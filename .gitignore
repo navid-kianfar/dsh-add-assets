@@ -16,3 +16,8 @@ Thumbs.db
 
 # JetBrains
 .idea/
+
+# NOTE: `generated/` is deliberately NOT ignored. It holds the Typert RPC
+# contract, which only the deepseek-harness generator can produce, so this
+# package cannot rebuild it on its own — it ships as committed source.
+# `pnpm test` fails if it drifts from src/host/; see scripts/regen-typert.mjs.

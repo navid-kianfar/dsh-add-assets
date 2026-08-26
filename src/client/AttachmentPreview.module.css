@@ -1,6 +1,99 @@
-/* Draft attachment cards. They sit inside the composer card above the textarea, so the surface they
+/* The row of chips above the cards: what the draft REFERENCES, as opposed to what it carries. A
+   reference is a path the model will read through a tool, so its chip is deliberately lighter than
+   an attachment card — smaller, no thumbnail, no details line — and the two never look like one
+   kind of thing at a glance.
+
+   Draft attachment cards. They sit inside the composer card above the textarea, so the surface they
    paint on is the input's own fill: the card reads as a chip laid ON the composer, one elevation
    step up from it, rather than as a panel of its own. Every colour is an alias token. */
+
+.refs {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  min-width: 0;
+  padding: 8px 12px 0;
+}
+
+.ref {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  min-width: 0;
+  height: 24px;
+  padding: 0 4px 0 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-layer-2);
+  transition: border-color .16s;
+}
+
+.ref:hover {
+  border-color: var(--dsw-alias-label-dimmed);
+}
+
+.refIconFile {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.refIconFolder {
+  composes: refIconFile;
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.refName {
+  min-width: 0;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The parent directory is what tells two same-named files apart; it yields its width to the name
+   first, and disappears entirely before the name starts truncating. */
+.refParent {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-dimmed);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+}
+
+.refRemove {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.refRemove:hover {
+  background: var(--dsw-alias-interactive-bg-hover-danger);
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.refRemove:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
 
 .rail {
   list-style: none;

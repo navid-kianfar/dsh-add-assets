@@ -96,6 +96,8 @@ const nodeHalf: UserConfig = {
   entry: {
     index: `${TSC_OUT}/index.js`,
     host: `${TSC_OUT}/host/index.js`,
+    remote: 'generated/typert.remote-client.js',
+    'typert.host': 'generated/typert.host.js',
   },
   outDir: 'lib',
   format: ['esm'],
@@ -108,8 +110,9 @@ const nodeHalf: UserConfig = {
   deps: {
     // The harness's own packages live in the running installation; keeping them imports is what
     // makes this plugin share its services rather than instantiate parallel ones.
-    neverBundle: (specifier: string) => specifier.startsWith('@deepseek-ai/'),
-    alwaysBundle: (specifier: string) => !isBuiltin(specifier) && !specifier.startsWith('@deepseek-ai/'),
+    neverBundle: (specifier: string) => specifier.startsWith('@deepseek-ai/') || specifier === 'zod',
+    alwaysBundle: (specifier: string) =>
+      !isBuiltin(specifier) && !specifier.startsWith('@deepseek-ai/') && specifier !== 'zod',
   },
 }
 

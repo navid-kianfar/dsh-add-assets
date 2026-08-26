@@ -1,6 +1,10 @@
-/* Workspace picker panel. It borrows the client's menu surface tokens rather than the card tokens:
-   the panel is a transient overlay anchored to a control, which is what `--dsw-specific-menu` and
-   the level-3 shadow are for. Every colour here is a token; none is a literal. */
+/* Path picker panel. It borrows the client's menu surface tokens rather than the card tokens: the
+   panel is a transient overlay anchored to a control, which is what `--dsw-specific-menu` and the
+   level-3 shadow are for.
+
+   Spacing is one 4px scale throughout — 4 inside a control, 8 between controls, 12 to the panel
+   edge — so the header, the scope switch, the crumbs, the field, and the footer share one gutter
+   and one rhythm instead of each carrying its own. Every colour is an alias token. */
 
 .panel {
   position: fixed;
@@ -20,7 +24,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 12px 8px;
+  padding: 10px 8px 8px 12px;
 }
 
 .title {
@@ -35,31 +39,82 @@
   white-space: nowrap;
 }
 
-.close {
+/* One shape for every icon-only control in the panel: close, descend, and anything added later. */
+.iconButton {
   flex: none;
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   border: none;
-  border-radius: 6px;
+  border-radius: 7px;
   background: none;
   color: var(--dsw-alias-label-tertiary);
   cursor: pointer;
 }
 
-.close:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
+.iconButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover-solid);
   color: var(--dsw-alias-label-primary);
+}
+
+/* Segmented scope switch. A two-state control reads faster as one grouped track than as two
+   separate buttons, and it says which capability is answering — the scopes have different reach. */
+.scopes {
+  display: flex;
+  gap: 2px;
+  margin: 0 12px 8px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--dsw-alias-bg-module-platform);
+}
+
+.scope {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 26px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.scope:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+.scopeOn {
+  composes: scope;
+  background: var(--dsw-specific-menu);
+  box-shadow: var(--dsw-shadow-lv1);
+  color: var(--dsw-alias-label-primary);
+  font-weight: 500;
 }
 
 .crumbs {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 2px;
-  padding: 0 12px 8px;
+  margin: 0 12px 8px;
   min-width: 0;
+  /* A deep absolute path is many crumbs; the trail scrolls rather than wrapping into a block that
+     would change the panel's internal layout as you descend. */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.crumbs::-webkit-scrollbar {
+  display: none;
 }
 
 .crumbCell {
@@ -67,6 +122,7 @@
   align-items: center;
   gap: 2px;
   min-width: 0;
+  flex: none;
 }
 
 .crumbSeparator {
@@ -76,9 +132,9 @@
 
 .crumb {
   max-width: 140px;
-  padding: 1px 4px;
+  padding: 1px 5px;
   border: none;
-  border-radius: 4px;
+  border-radius: 5px;
   background: none;
   font: inherit;
   font-size: 12px;
@@ -103,6 +159,7 @@
 }
 
 .search {
+  flex: none;
   margin: 0 12px 8px;
   height: 32px;
   padding: 0 10px;
@@ -125,11 +182,13 @@
   border-color: var(--dsw-alias-brand-primary);
 }
 
+/* The only element that flexes. The panel's height is fixed, so every row-count change is absorbed
+   here as scroll rather than as a resize that would move the whole panel. */
 .body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 0 6px;
+  padding: 0 8px 8px;
   scrollbar-color: var(--dsw-alias-scrollbar-bg-l2) transparent;
 }
 
@@ -140,7 +199,7 @@
 }
 
 .note {
-  margin: 6px 6px 10px;
+  margin: 8px 4px;
   font-size: 12px;
   line-height: 1.5;
   color: var(--dsw-alias-label-tertiary);
@@ -149,6 +208,12 @@
 .noteError {
   composes: note;
   color: var(--dsw-alias-state-error-primary);
+  overflow-wrap: anywhere;
+}
+
+.noteQuiet {
+  composes: note;
+  color: var(--dsw-alias-label-dimmed);
 }
 
 .row {
@@ -170,8 +235,8 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: 10px;
+  padding: 7px 8px;
   border: none;
   border-radius: 8px;
   background: none;
@@ -186,21 +251,19 @@
   outline-offset: -2px;
 }
 
-.check {
+/* Type icons carry colour, not a plate: a folder is the thing you navigate and a file is the thing
+   you take, and one tinted glyph each separates them faster down a column than two grey ones. */
+.iconFile {
   flex: none;
   display: grid;
   place-items: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
+  width: 16px;
+  height: 16px;
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* A selected row states it twice — filled glyph plate and business-coloured name — because the rail
-   of chosen paths is only visible as a count in the footer. */
-.checkOn {
-  composes: check;
-  background: var(--dsw-alias-state-business-tertiary);
+.iconFolder {
+  composes: iconFile;
   color: var(--dsw-alias-state-business-primary);
 }
 
@@ -220,34 +283,42 @@
   white-space: nowrap;
 }
 
+.rowNameOn {
+  composes: rowName;
+  font-weight: 500;
+}
+
 .rowPath {
   font-size: 11px;
-  line-height: 16px;
+  line-height: 15px;
   color: var(--dsw-alias-label-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* Right-to-left so a long path truncates at its START: the segments nearest the file are what
+     tell two same-named results apart. */
   direction: rtl;
   text-align: left;
 }
 
-.enter {
+/* A real checkbox rather than a recoloured type icon: what a row IS and whether it is CHOSEN are
+   two facts, and one glyph cannot carry both without the list becoming a puzzle. */
+.tick {
   flex: none;
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
-  margin-right: 4px;
-  border: none;
-  border-radius: 6px;
-  background: none;
-  color: var(--dsw-alias-label-tertiary);
-  cursor: pointer;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--dsw-alias-border-l3);
+  border-radius: 5px;
+  color: transparent;
 }
 
-.enter:hover {
-  background: var(--dsw-alias-interactive-bg-hover-solid);
-  color: var(--dsw-alias-label-primary);
+.tickOn {
+  composes: tick;
+  border-color: var(--dsw-alias-button-info-fill);
+  background: var(--dsw-alias-button-info-fill);
+  color: var(--dsw-alias-label-primary-inverted);
 }
 
 .footer {
@@ -258,12 +329,33 @@
   border-top: 1px solid var(--dsw-alias-border-l2);
 }
 
-.count {
-  flex: 1;
-  min-width: 0;
+.hidden {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   font-size: 12px;
   line-height: 18px;
   color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.checkbox {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--dsw-alias-button-info-fill);
+  cursor: pointer;
+}
+
+.count {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+  font-variant-numeric: tabular-nums;
 }
 
 .clear,
@@ -307,8 +399,8 @@
 
 .clear:focus-visible,
 .add:focus-visible,
-.close:focus-visible,
-.enter:focus-visible,
+.iconButton:focus-visible,
+.scope:focus-visible,
 .crumb:focus-visible {
   outline: 2px solid var(--dsw-alias-brand-primary);
   outline-offset: 1px;

@@ -11,9 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import {
-  IconFolderClose16, IconPlusOutline16, Menu, Tooltip,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconPlusOutline16, Menu, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pulls the ui-conversation SlotMap merge (the input.left seat) and the input standard
@@ -24,7 +22,7 @@ import type { Shortcut } from '../shortcut.ts'
 import { AssetPicker } from './AssetPicker.tsx'
 import type { AddAssetsPlateInjected, PickerMode } from './contract.ts'
 import { caretOf, findComposerTextarea } from './composer-dom.ts'
-import { FileGlyph, SlashGlyph, UploadGlyph } from './Glyphs.tsx'
+import { FileGlyph, FolderGlyph, SlashGlyph, UploadGlyph } from './Glyphs.tsx'
 import { isApplePlatform } from './platform.ts'
 import { appendMentions } from './mention.ts'
 import { suppressResidentCommandButton } from './resident-button.ts'
@@ -182,7 +180,7 @@ export function AddAssetsPlate({
       },
       {
         id: 'folders',
-        icon: <IconFolderClose16 />,
+        icon: <FolderGlyph />,
         disabled: browse === undefined,
         label: plateRow(t('plate.folders'), workspaceNote ?? chordText(chords.folders), workspaceNote !== undefined),
       },

@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { Config, validateAddAssetsSettings } from '../src/host/index.ts'
+import { AddAssetsService, validateAddAssetsSettings } from '../src/host/index.ts'
 import type { AddAssetsSettings } from '../src/host/types.ts'
 
 /** A composition row every field of which the loader would accept. */
 const COMPLETE: AddAssetsSettings = {
   replaceCommandButton: true,
   deviceUpload: true,
+  outsideWorkspace: true,
+  browseMaxEntries: 500,
   filesShortcut: 'mod+u',
   foldersShortcut: 'mod+shift+u',
   commandShortcut: 'mod+/',
@@ -13,6 +15,8 @@ const COMPLETE: AddAssetsSettings = {
   previewDensity: 'card',
   previewDetails: true,
 }
+
+const Config = AddAssetsService.Config
 
 describe('Config', () => {
   it('accepts a complete row unchanged', () => {
@@ -28,6 +32,11 @@ describe('Config', () => {
     expect(() => Config({ ...COMPLETE, pickerResultLimit: 0 })).toThrow()
     expect(() => Config({ ...COMPLETE, pickerResultLimit: 201 })).toThrow()
     expect(() => Config({ ...COMPLETE, pickerResultLimit: 2.5 })).toThrow()
+  })
+
+  it('refuses a level cap the Host would not honour', () => {
+    expect(() => Config({ ...COMPLETE, browseMaxEntries: 0 })).toThrow()
+    expect(() => Config({ ...COMPLETE, browseMaxEntries: 5001 })).toThrow()
   })
 
   it('refuses a preview density it draws no cards for', () => {

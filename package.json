@@ -24,6 +24,12 @@
     "./client": {
       "default": "./lib/client.js"
     },
+    "./typert": {
+      "default": "./lib/typert.host.js"
+    },
+    "./remote": {
+      "default": "./lib/remote.js"
+    },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
@@ -47,13 +53,16 @@
     "build": "tsc -p tsconfig.build.json && tsdown",
     "prepare": "tsc -p tsconfig.build.json && tsdown",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "node scripts/check-typert.mjs && vitest run",
+    "check:typert": "node scripts/check-typert.mjs",
+    "regen:typert": "node scripts/regen-typert.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
     "@deepseek-ai/dsh-file-reference": "*",
     "@deepseek-ai/dsh-settings": "*",
-    "@deepseek-ai/schemastery": "*"
+    "@deepseek-ai/schemastery": "*",
+    "@deepseek-ai/dsh-typert-protocol": "*"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "link:../../deepseek-harness/vendor/cordis",
@@ -100,5 +109,8 @@
   "types": "./types/index.d.ts",
   "engines": {
     "node": "^22.19 || >=24"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
   }
 }

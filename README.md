@@ -4,12 +4,15 @@ An options plate on the composer's `+` for the [DeepSeek Harness](https://github
 
 The harness's own `+` does exactly one thing: it opens the slash-command menu. This plugin makes that one entry among several — **add files**, **add folders**, **upload from this device**, **slash command** — each with a keyboard shortcut, and each reaching the same machinery the composer already uses.
 
-**What makes the picker worth opening rather than typing `@`:** it keeps your selection across directories and searches, so three files from three folders go in with one gesture. Folders are a first-class target rather than a step on the way to a file. And the attachment row above the draft finally says what you attached — thumbnail, name, format, dimensions, size — with a full-size preview you can page through and remove from.
+**What makes the picker worth opening rather than typing `@`:** it keeps your selection across directories, searches, and scopes, so three files from three folders go in with one gesture. Folders are a first-class target rather than a step on the way to a file. And it reaches **outside the project** — the harness's own `@` completion cannot, by design.
+
+Everything the draft is carrying then shows above the textarea: referenced paths as removable chips, pending images as cards with format, dimensions, and size, and a full-size preview you can page through and remove from.
 
 ## Requirements
 
 - A dsh installation with the Web Client (`@deepseek-ai/dsh-web-app`).
-- For the two workspace rows: a Host file-reference provider (`@deepseek-ai/dsh-file-reference-local` in the stock profiles). Without one, both rows say so and the rest of the plate still works.
+- For **Project** scope: a Host file-reference provider (`@deepseek-ai/dsh-file-reference-local` in the stock profiles). Without one, the picker opens in **This machine** scope alone.
+- For **This machine** scope: nothing extra — this plugin's own Host endpoint serves it. Turn it off with `outsideWorkspace: false`.
 - For the slash-command row: the trigger pipeline (`@deepseek-ai/dsh-client-ui-input-trigger`), which is what the resident `+` uses too. Without it, that row says so.
 
 ## Install
@@ -45,14 +48,25 @@ The bundle appends itself to your profile automatically. Verify with `dsh --prof
 
 | Row | What it adds | Default shortcut |
 | --- | --- | --- |
-| **Add files** | Browses the session's working directory and inserts the chosen paths as `@path` mentions in the draft — the same text the composer's `@` completion writes, so tools resolve them the same way. | `⌘U` / `Ctrl+U` |
+| **Add files** | Browses for files and inserts the chosen paths as `@path` mentions in the draft — the same text the composer's `@` completion writes, so tools resolve them the same way. | `⌘U` / `Ctrl+U` |
 | **Add folders** | The same picker, listing directories only and selecting them rather than descending. Inserts `@path/`. | `⇧⌘U` / `Ctrl+Shift+U` |
 | **Upload from this device** | The browser's file chooser. Images become draft attachments, exactly as paste and drop produce. | — |
 | **Slash command** | Opens the composer's own slash-command menu over the caret. This is what the resident `+` did. | `⌘/` / `Ctrl+/` |
 
-Inside the picker: type to search the whole workspace, or type a path to browse a level. `↑`/`↓` move, `Enter` selects or descends, `→` opens a folder, `←` goes up, `⌘Enter` adds everything selected, `Esc` closes.
+### The two scopes
 
-## The attachment preview
+A switch at the top of the picker says which capability is answering, because they do not have the same reach:
+
+- **Project** — the session's working directory, served by the Host's `@file` index. Typing fuzzy-searches the whole workspace at once; typing a path browses a level. Paths go into the draft workspace-relative.
+- **This machine** — the Host filesystem, served by this plugin's endpoint. One level at a time from `Home`, filtered by name, with the full path in the breadcrumb. Paths go into the draft absolute.
+
+Selection carries across the switch, so you can take two files from the project and one from `~/Downloads` in a single **Add**.
+
+Keys: `↑`/`↓` move, `Enter` selects or descends, `→` opens a folder, `←` goes up a level, `⌘Enter` adds everything selected, `Esc` closes. The panel's height is fixed, so filtering never moves it under your pointer.
+
+## What the draft is carrying
+
+Referenced paths appear as chips above the textarea: file or folder glyph, name, parent directory, and an `×` that removes the mention from the draft. They are scanned from the draft rather than held beside it, so editing or deleting a `@path` by hand keeps the chips honest.
 
 Each pending image is a card: a cropped square thumbnail, the file name, and a details line (`PNG · 1024×768 · 240KB`). Hover reveals a remove control; a click opens the full image over a dimmed page, where `←`/`→` page through the rest of the draft's attachments and the trash control removes the one you are looking at.
 
@@ -70,6 +84,8 @@ Everything below is editable at **Settings → Plugins → Add assets**, and can
       config:
         replaceCommandButton: true
         deviceUpload: true
+        outsideWorkspace: true
+        browseMaxEntries: 500
         filesShortcut: mod+u
         foldersShortcut: mod+shift+u
         commandShortcut: mod+/
@@ -82,12 +98,20 @@ Everything below is editable at **Settings → Plugins → Add assets**, and can
 | --- | --- |
 | `replaceCommandButton` | Hide the composer's own `+` so this plugin's plate is the only one. See the note below. |
 | `deviceUpload` | Offer the device file chooser under the files entry. Paste and drop work either way. |
+| `outsideWorkspace` | Let the picker leave the project. See the note below. |
+| `browseMaxEntries` | Entries the Host reports per browsed level, 1–5000. A home directory is well past this; the picker says it truncated and the search field is how you get past it. |
 | `filesShortcut`, `foldersShortcut`, `commandShortcut` | Chords like `mod+u`, `mod+shift+u`, `mod+/`. `mod` is Command on macOS and Ctrl elsewhere. Blank disables one. A chord the browser could not match is refused at load, naming the field. |
 | `pickerResultLimit` | Rows the picker renders per query, 1–200. The Host applies its own, lower cap (20 by default), so raising this alone does not widen results — raise the file-reference provider's `maxResults` with it. |
 | `previewDensity` | `card` (thumbnail, name, details) or `compact` (small round thumbnail and name). |
 | `previewDetails` | Whether the details line shows format, dimensions, and size. |
 
 Shortcuts are deliberately modifier chords: the composer's textarea owns every bare key, and a plain-key shortcut would eat your typing.
+
+### About `outsideWorkspace`
+
+The harness's file-reference provider refuses every path outside the session's working directory — `resolveDisplayDirectory` rejects `..` and symlinks outright — and the Workspace directory browser returns directories only. So reaching a **file** outside the project needs an endpoint of this plugin's own, and that is what the `addAssets/browse` Remote is.
+
+It reports entry **names**, kinds, and absolute paths for any directory the Host account can read. It never opens a file, and it never returns contents. What it does add over what the harness already exposes is the ability to enumerate the machine's tree from a browser session, including file names. Set it to `false` where that enumeration is itself the thing to withhold; the picker then opens in Project scope alone and the scope switch disappears rather than showing one choice.
 
 ### About `replaceCommandButton`
 
@@ -106,6 +130,7 @@ None; this package neither assembles nor sends a provider request.
 ## Known Limitations and Deferred Work
 
 - **The resident `+` is hidden, not replaced.** Until the harness declares a slot for that seat, the takeover depends on an accessible signature rather than a contract. It fails visibly (two buttons), never silently.
+- **Machine scope does not search across directories.** The filter narrows the level you are in; the project index is the only thing that searches a tree, and it stops at the workspace root.
 - **The picker's caret is the composer's, but its span is collapsed.** A slash command picked from the plate inserts at the caret and replaces nothing, even if text is selected.
 - **Images only in the preview.** The composer accepts image attachments alone, so a card is always an image card; non-image file cards wait until the composer accepts non-image attachments.
 - **No zoom or download in the full-size preview.** It renders the original at fit-to-viewport size, pages, and removes.
@@ -114,13 +139,20 @@ None; this package neither assembles nor sends a provider request.
 ## Development
 
 ```bash
-pnpm install
 pnpm run typecheck
-pnpm run test
+pnpm run test       # the Typert freshness check, then vitest
 pnpm run build      # tsc emit → tsdown's two halves (lib/host.js, lib/client.js)
 ```
 
 The `link:` devDependencies point at a sibling `deepseek-harness` checkout, which supplies the types and the built `lib/` this package compiles against. The build reproduces the two artifact formats the harness's own (unpublished) client preset emits; `tsdown.config.ts` documents why each one is shaped the way it is.
+
+`generated/` holds the Typert RPC contract for the `addAssets` endpoint. Only the harness's generator can produce it, so it ships as committed source and `pnpm test` fails when it drifts from `src/host/`. After changing the endpoint or any type it names:
+
+```bash
+node scripts/regen-typert.mjs ../deepseek-harness
+```
+
+It refuses to run against a dirty harness checkout, takes several minutes, and restores everything it touched there in a `finally`. Two regens must never overlap.
 
 ## License
 

@@ -1,12 +1,11 @@
 /**
  * Add-assets plugin, browser half. Three registrations over one settings namespace: the composer's
- * `+` plate in the tool row, the draft attachment preview inside the composer card, and the card on
- * the plugin settings tab keyed by the `add-assets` namespace.
+ * `+` plate in the tool row, the draft reference-and-attachment row inside the composer card, and
+ * the card on the plugin settings tab keyed by the `add-assets` namespace.
  *
  * Nothing here reaches a model directly. The plate writes `@path` mentions into the draft through
  * the input machine's public `setDraft`, which makes them ordinary prompt text a person edits and
- * sends, and device files become the same browser-owned draft images that paste and drop already
- * produce.
+ * sends, and device files become the same browser-owned draft images that paste and drop produce.
  * @module @achasoft/dsh-add-assets/client
  */
 
@@ -22,12 +21,18 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 // Type-only: the keyed settings.plugin.item slot declaration.
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import type { InputTriggerServiceContract } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
+// The generated Host-for-Client contract for this plugin's own endpoint. Importing it here — rather
+// than adding a row to the curated api-remotes assembly — is what keeps the capability a plugin: the
+// namespace mounts and unmounts with this fiber, and no shipped source names `addAssets`.
+import addAssetsRemote from '../../generated/typert.remote-client.js'
 import type { AddAssetsSettings } from '../host/types.ts'
 import { AddAssetsPlate } from './AddAssetsPlate.tsx'
 import { AddAssetsSettingsCard } from './AddAssetsSettingsCard.tsx'
 import { AttachmentPreview } from './AttachmentPreview.tsx'
+import { machineLevel, projectLevel } from './browse.ts'
 import type {
-  AddAssetsPlateInjected, AddAssetsSettingsInjected, AttachmentPreviewInjected, WorkspaceBrowse,
+  AddAssetsPlateInjected, AddAssetsSettingsInjected, AssetBrowse, AttachmentPreviewInjected,
+  BrowseScope,
 } from './contract.ts'
 import { ImageIntake } from './intake.ts'
 import { en, zh, type AddAssetsKey } from './locales.ts'
@@ -37,13 +42,13 @@ export type { AddAssetsPlateProps } from './AddAssetsPlate.tsx'
 export type { AttachmentPreviewProps } from './AttachmentPreview.tsx'
 export type { AddAssetsSettingsCardProps } from './AddAssetsSettingsCard.tsx'
 export type {
-  AddAssetsPlateInjected, AddAssetsSettingsInjected, AttachmentPreviewInjected, PickerMode,
-  WorkspaceBrowse,
+  AddAssetsPlateInjected, AddAssetsSettingsInjected, AssetBrowse, AttachmentPreviewInjected,
+  BrowseCrumb, BrowseEntry, BrowseLevel, BrowseScope, PickerMode,
 } from './contract.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
-    /** The composer plate's, workspace picker's, attachment preview's, and settings card's copy. */
+    /** The composer plate's, path picker's, draft row's, and settings card's copy. */
     'add-assets': AddAssetsKey
   }
 }
@@ -57,21 +62,35 @@ const NS = 'add-assets'
  */
 const PLATE_ORDER = -10
 
-/**
- * Shadowing rank of the workspace-capable plate. Cell shadowing renders the LOWEST priority, so the
- * entry that can browse wins over the base entry whenever a Host file-reference provider is mounted.
- */
-const PLATE_WITH_BROWSE = -1
-
 /** Required services: the slot registry, the copy, the settings scope, and session scope resolution. */
-export const inject = ['slots', 'locale', 'settingsScope', 'sessions']
+export const inject = ['slots', 'locale', 'settingsScope', 'sessions', 'remote']
 
 /**
- * Client plugin body: register the two composer seats and the settings card.
+ * Client plugin body: mount this plugin's own Remote namespace, then register the two composer
+ * seats and the settings card.
  * @param ctx - client root context.
+ * @returns after the `addAssets` namespace is callable; its methods are withdrawn on unload.
  */
-export function apply(ctx: ClientContext): void {
+export async function apply(ctx: ClientContext): Promise<void> {
+  // Mounted on THIS fiber, so the endpoint's lifetime is the plugin's.
+  await ctx.remote.$mount(addAssetsRemote)
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'add-assets: dictionaries')
+
+  // The surfaces are a child so they can INJECT the namespace their parent just provided. Cordis
+  // will not hand a fiber a service it did not declare, and the parent cannot declare one it
+  // creates itself; the split is what lets the seats hold a properly injected reference.
+  ctx.plugin({
+    name: 'add-assets-surface',
+    inject: ['slots', 'locale', 'settingsScope', 'sessions', 'remote', 'remote.addAssets'],
+    apply: surface,
+  })
+}
+
+/**
+ * Register the composer seats and the settings card against a context holding both namespaces.
+ * @param ctx - the child fiber, with `remote.addAssets` injected.
+ */
+function surface(ctx: ClientContext): void {
   const scope = ctx.settingsScope.bind<AddAssetsSettings>({ namespace: NS })
   const intake = new ImageIntake()
 
@@ -98,24 +117,15 @@ export function apply(ctx: ClientContext): void {
     }),
   }, AddAssetsSettingsCard))
 
-  // The plate without workspace browsing: device upload and the slash-command menu still work, and
-  // its two workspace rows say why they are unavailable rather than disappearing. A deployment that
-  // mounts a file-reference provider gets the entry below instead.
-  registerPlate(ctx, scope, intake, () => undefined, 0)
+  // The plate without project discovery: machine browsing, device upload, and the slash-command
+  // menu still work. A deployment that mounts a file-reference provider gets the entry below.
+  registerPlate(ctx, scope, intake, false, 0)
 
-  // A child fiber, so the workspace-capable plate exists exactly while the Host serves discovery:
-  // the namespace is a curated Remote, and a fiber cannot read one it did not inject.
-  ctx.inject(['slots', 'sessions', 'remote', 'remote.fileReferences'], (rctx: ClientContext) => {
-    registerPlate(rctx, scope, intake, sessionId => ({
-      list: async (query, signal) => {
-        const result = await rctx.remote.fileReferences.list(sessionId, query, signal)
-        // A Host failure is thrown rather than folded into an empty list: "nothing matches" and
-        // "the workspace could not be read" are different answers, and the picker says so.
-        if (!result.ok) throw new Error(`${result.error.message} (${result.error.code})`)
-        return result.value
-      },
-    }), PLATE_WITH_BROWSE)
-  })
+  // A child fiber, so the project-scope plate exists exactly while the Host serves discovery: the
+  // namespace is a curated Remote, and a fiber cannot read one it did not inject. Both entries
+  // share one cell id, so the richer one shadows rather than doubling the button.
+  ctx.inject(['slots', 'sessions', 'locale', 'remote', 'remote.addAssets', 'remote.fileReferences'],
+    (fctx: ClientContext) => { registerPlate(fctx, scope, intake, true, -1) })
 }
 
 /**
@@ -123,14 +133,14 @@ export function apply(ctx: ClientContext): void {
  * @param ctx - the fiber owning this registration; its lifetime is the entry's.
  * @param scope - the bound `add-assets` settings scope.
  * @param intake - the per-session image intake the attachment seat publishes into.
- * @param browseOf - resolves workspace discovery for one session, or undefined when unavailable.
+ * @param project - whether this fiber can reach project-scope discovery.
  * @param priority - cell shadowing rank; the lowest live entry of the cell renders.
  */
 function registerPlate(
   ctx: ClientContext,
   scope: SettingsScope<AddAssetsSettings>,
   intake: ImageIntake,
-  browseOf: (sessionId: SessionId) => WorkspaceBrowse | undefined,
+  project: boolean,
   priority: number,
 ): void {
   ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
@@ -144,10 +154,58 @@ function registerPlate(
     inject: (sessionId: SessionId): AddAssetsPlateInjected => ({
       hooks: { addAssetsSettings: scope },
       openCommandMenu: commandMenuOpener(ctx, sessionId),
-      browse: browseOf(sessionId),
+      browse: assetBrowse(ctx, sessionId, project, () => scope.getSnapshot().value),
       attachDeviceFiles: files => intake.add(sessionId, files),
     }),
   }, AddAssetsPlate))
+}
+
+/**
+ * Build the picker's data face for one session.
+ *
+ * Which scopes it offers is a fact about the deployment, resolved per session rather than per
+ * plugin: `remote.fileReferences` is a curated namespace a composition may omit, and machine
+ * browsing is a setting a person can turn off. An empty roster leaves the plate's two workspace
+ * rows disabled with a reason instead of opening a panel that can list nothing.
+ * @param ctx - the fiber holding both Remote namespaces.
+ * @param sessionId - the session the picker is opened from.
+ * @param settings - reads the resolved section at call time, so a committed change takes effect
+ *   without remounting the seat.
+ * @returns the face, or undefined when no scope can answer.
+ */
+function assetBrowse(
+  ctx: ClientContext,
+  sessionId: SessionId,
+  project: boolean,
+  settings: () => AddAssetsSettings | undefined,
+): AssetBrowse | undefined {
+  const scopes: BrowseScope[] = [
+    ...project ? ['project' as const] : [],
+    ...settings()?.outsideWorkspace === false ? [] : ['machine' as const],
+  ]
+  if (scopes.length === 0) return undefined
+  const t = ctx.locale.bind(NS)
+  return {
+    scopes,
+    // Both scopes open at their own root: `''` is the workspace root for discovery, and the Host
+    // endpoint reads a blank path as the account's home directory.
+    start: () => '',
+    list: async (scope, directory, filter, signal) => {
+      if (scope === 'project') {
+        const result = await ctx.remote.fileReferences.list(sessionId, directory + filter.trimStart(), signal)
+        // A Host failure is thrown rather than folded into an empty list: "nothing matches" and
+        // "the workspace could not be read" are different answers, and the picker says so.
+        if (!result.ok) throw new Error(`${result.error.message} (${result.error.code})`)
+        return projectLevel(result.value, directory, filter.trim() !== '', t('picker.root'))
+      }
+      const answer = await ctx.remote.addAssets.browse(directory, filter, signal)
+      if (!answer.ok) throw new Error(`${answer.error.message} (${answer.error.code})`)
+      // The endpoint returns its refusals as values so each one can be said differently; the picker
+      // renders whichever message came back.
+      if (!answer.value.ok) throw new Error(answer.value.message)
+      return machineLevel(answer.value.listing, t('picker.home'))
+    },
+  }
 }
 
 /**
@@ -164,8 +222,6 @@ function commandMenuOpener(
   ctx: ClientContext,
   sessionId: SessionId,
 ): ((caret: number, draftRev: number, leading: boolean) => void) | undefined {
-  // Optional-service convention: `get` answers undefined for a service this fiber did not inject
-  // and the composition did not mount.
   const inputTriggers = ctx.get('inputTriggers') as InputTriggerServiceContract | undefined
   const actx = ctx.sessions.scope(sessionId)
   if (inputTriggers === undefined || actx === undefined) return undefined

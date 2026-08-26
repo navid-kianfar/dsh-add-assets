@@ -22,6 +22,19 @@
         # keep working either way; this only adds the explicit chooser.
         deviceUpload: true
 
+        # Let the picker leave the session's working directory. The Host's own
+        # file-reference provider refuses every path outside it, so this is served
+        # by this plugin's endpoint, which lists entry NAMES in any directory the
+        # Host account can read. It opens no file — but it does let a browser
+        # session enumerate the machine's directory tree, so set it false for a
+        # deployment where that enumeration is itself the thing to withhold.
+        outsideWorkspace: true
+
+        # Entries the Host reports per browsed level before saying it truncated.
+        # A home directory or a node_modules is well past this; the picker says so
+        # and the search field is how you get past it.
+        browseMaxEntries: 500
+
         # mod is Command on macOS and Ctrl elsewhere. Blank disables a shortcut.
         # These three are deliberately modifier chords: the composer's textarea
         # owns every bare key, and a plain-key shortcut would eat typing.

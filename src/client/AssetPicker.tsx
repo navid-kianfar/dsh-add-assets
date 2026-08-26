@@ -1,9 +1,10 @@
 /**
- * The workspace picker: a panel anchored above the composer plate that browses the session's
- * working directory and returns the chosen paths as `@path` mentions.
+ * The path picker: a panel anchored above the composer plate that browses either the session's
+ * working directory or the Host filesystem, and returns the chosen paths as `@path` mentions.
  *
- * Discovery is the Host's own file-reference listing, so what this panel offers is exactly what the
- * composer's `@` completion offers — one query grammar, one set of exclusions, one result cap.
+ * The panel's height is FIXED for a given viewport. A panel that grew and shrank with its row count
+ * would move on every keystroke, because it is anchored by its bottom edge to a composer that does
+ * not move — so filtering would walk the list out from under the pointer about to click it.
  * @module @achasoft/dsh-add-assets/client/AssetPicker
  */
 
@@ -11,23 +12,20 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { CSSProperties, KeyboardEvent, RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  IconChevronRightOutline14, IconCloseOutline16, IconFolderClose16,
+  IconCheckOutline14, IconChevronRightOutline14, IconCloseOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
-import type { FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference/types'
-import type { PickerMode, WorkspaceBrowse } from './contract.ts'
-import { FileGlyph } from './Glyphs.tsx'
-import {
-  basename, browseQuery, crumbsOf, dirnameOf, mentionOf, parentDirectory,
-} from './mention.ts'
+import type { AssetBrowse, BrowseEntry, BrowseLevel, BrowseScope, PickerMode } from './contract.ts'
+import { FileGlyph, FolderGlyph, MachineGlyph, ProjectGlyph } from './Glyphs.tsx'
+import { mentionOf } from './mention.ts'
 import css from './AssetPicker.module.css'
 
-/** Panel width, and the distances it keeps from its anchor and from the viewport edges. */
-const WIDTH = 380
+/** Panel geometry, and the distances it keeps from its anchor and from the viewport edges. */
+const WIDTH = 400
 const GAP = 8
 const MARGIN = 12
-/** Design cap on the panel's height; the viewport clamps below it on short windows. */
-const MAX_HEIGHT = 440
+/** Design height; the viewport clamps below it on short windows, and nothing else changes it. */
+const HEIGHT = 452
 
 /** Keystroke-to-request delay. Long enough that a typed word is one query, short enough to feel live. */
 const QUERY_DEBOUNCE_MS = 120
@@ -35,13 +33,16 @@ const QUERY_DEBOUNCE_MS = 120
 /** What the panel is currently showing. */
 type Status = 'loading' | 'ready' | 'failed'
 
-/** Props of the workspace picker. */
+/** An empty level, so a failed or in-flight query still renders one stable list container. */
+const EMPTY_LEVEL: BrowseLevel = { crumbs: [], entries: [], truncated: false }
+
+/** Props of the path picker. */
 export interface AssetPickerProps {
   /** Which entry opened the panel; folders mode hides files and selects directories. */
   mode: PickerMode
-  /** Host discovery for this session's working directory. */
-  browse: WorkspaceBrowse
-  /** Rows rendered per query, from the settings section. */
+  /** Path discovery for both scopes. */
+  browse: AssetBrowse
+  /** Rows rendered per level, from the settings section. */
   resultLimit: number
   /** The plate button the panel is placed above. */
   anchorRef: RefObject<HTMLElement | null>
@@ -54,49 +55,40 @@ export interface AssetPickerProps {
 }
 
 /**
- * Place the panel above its anchor, clamped inside the viewport.
+ * Place the panel above its anchor at a fixed height.
+ *
+ * Only the anchor and the viewport move it. The panel is never measured, which is what makes its
+ * position independent of how many rows the current filter matched.
  * @param anchorRef - the trigger element.
- * @param panelRef - the panel, measured so the clamp uses its real height.
- * @returns the fixed coordinates and height cap, or null before the first measurement.
+ * @returns the fixed coordinates and height, or null before the first measurement.
  */
-function usePlacement(
-  anchorRef: RefObject<HTMLElement | null>,
-  panelRef: RefObject<HTMLElement | null>,
-): CSSProperties | null {
+function usePlacement(anchorRef: RefObject<HTMLElement | null>): CSSProperties | null {
   const [style, setStyle] = useState<CSSProperties | null>(null)
   useLayoutEffect(() => {
     const place = (): void => {
       const rect = anchorRef.current?.getBoundingClientRect()
       if (rect === undefined) return
-      const available = Math.max(0, rect.top - GAP - MARGIN)
-      const maxHeight = Math.min(MAX_HEIGHT, available)
-      const height = Math.min(panelRef.current?.offsetHeight ?? maxHeight, maxHeight)
+      const height = Math.min(HEIGHT, Math.max(0, rect.top - GAP - MARGIN))
       const left = Math.min(Math.max(rect.left, MARGIN), Math.max(MARGIN, window.innerWidth - WIDTH - MARGIN))
-      setStyle({ left, top: Math.max(MARGIN, rect.top - GAP - height), width: WIDTH, maxHeight })
+      setStyle({ left, top: Math.max(MARGIN, rect.top - GAP - height), width: WIDTH, height })
     }
     place()
     window.addEventListener('scroll', place, true)
     window.addEventListener('resize', place)
-    const panel = panelRef.current
-    // The panel's own height changes as rows arrive, and a stale placement would leave it hanging
-    // below the composer instead of resting on it.
-    const observer = typeof ResizeObserver === 'undefined' || panel === null ? null : new ResizeObserver(place)
-    if (panel !== null) observer?.observe(panel)
     return () => {
-      observer?.disconnect()
       window.removeEventListener('scroll', place, true)
       window.removeEventListener('resize', place)
     }
-  }, [anchorRef, panelRef])
+  }, [anchorRef])
   return style
 }
 
 /**
- * Browse the workspace and choose paths.
+ * Browse paths and choose them.
  *
- * Selection is kept across navigation and filtering: a person picking three files from three
- * directories adds them in one gesture, which is the reason this panel exists rather than three
- * passes through the composer's `@` completion.
+ * Selection survives navigation, filtering, and the scope switch: a person collecting three files
+ * from three directories adds them in one gesture, which is the reason this panel exists rather
+ * than three passes through the composer's `@` completion.
  * @param props - mode, discovery, limits, anchor, copy, and the two settlement callbacks.
  * @returns the portalled panel.
  */
@@ -104,30 +96,33 @@ export function AssetPicker({ mode, browse, resultLimit, anchorRef, t, onClose, 
   const panelRef = useRef<HTMLDivElement | null>(null)
   const searchRef = useRef<HTMLInputElement | null>(null)
   const listRef = useRef<HTMLUListElement | null>(null)
-  const [directory, setDirectory] = useState('')
+  const [scope, setScope] = useState<BrowseScope>(() => browse.scopes[0] ?? 'project')
+  const [directory, setDirectory] = useState(() => browse.start(browse.scopes[0] ?? 'project'))
   const [filter, setFilter] = useState('')
-  const [candidates, setCandidates] = useState<readonly FileReferenceCandidate[]>([])
+  const [level, setLevel] = useState<BrowseLevel>(EMPTY_LEVEL)
   const [status, setStatus] = useState<Status>('loading')
+  const [failure, setFailure] = useState('')
   const [highlight, setHighlight] = useState(0)
+  const [showHidden, setShowHidden] = useState(false)
   // Insertion order is the order the user chose in, which is the order the mentions land in the
   // draft; a Map preserves it and still answers "is this path selected" in one lookup.
-  const [selected, setSelected] = useState<ReadonlyMap<string, FileReferenceCandidate>>(new Map())
-  const style = usePlacement(anchorRef, panelRef)
+  const [selected, setSelected] = useState<ReadonlyMap<string, BrowseEntry>>(new Map())
+  const style = usePlacement(anchorRef)
 
   useEffect(() => { searchRef.current?.focus() }, [])
 
-  const query = browseQuery(directory, filter)
   useEffect(() => {
     const controller = new AbortController()
     setStatus('loading')
     const timer = setTimeout(() => {
-      browse.list(query, controller.signal).then((found) => {
+      browse.list(scope, directory, filter, controller.signal).then((next) => {
         if (controller.signal.aborted) return
-        setCandidates(found)
+        setLevel(next)
         setStatus('ready')
-      }, () => {
+      }, (error: unknown) => {
         if (controller.signal.aborted) return
-        setCandidates([])
+        setLevel(EMPTY_LEVEL)
+        setFailure(error instanceof Error ? error.message : '')
         setStatus('failed')
       })
     }, QUERY_DEBOUNCE_MS)
@@ -135,47 +130,57 @@ export function AssetPicker({ mode, browse, resultLimit, anchorRef, t, onClose, 
       clearTimeout(timer)
       controller.abort()
     }
-  }, [browse, query])
+  }, [browse, directory, filter, scope])
 
   // Folders mode hides files outright rather than showing them unselectable: a row that cannot be
   // chosen is noise in a list whose whole purpose is choosing.
   const matching = useMemo(
-    () => mode === 'folders' ? candidates.filter(row => row.kind === 'directory') : candidates,
-    [candidates, mode],
+    () => level.entries.filter(entry =>
+      (showHidden || !entry.hidden) && (mode !== 'folders' || entry.kind === 'directory')),
+    [level.entries, mode, showHidden],
   )
   const rows = useMemo(() => matching.slice(0, resultLimit), [matching, resultLimit])
-  const truncated = matching.length > rows.length
+  const truncated = level.truncated || matching.length > rows.length
   useEffect(() => { setHighlight(0) }, [rows])
 
-  const toggle = useCallback((candidate: FileReferenceCandidate): void => {
+  const toggle = useCallback((entry: BrowseEntry): void => {
     setSelected((current) => {
       const next = new Map(current)
-      if (!next.delete(candidate.path)) next.set(candidate.path, candidate)
+      if (!next.delete(entry.path)) next.set(entry.path, entry)
       return next
     })
   }, [])
 
-  const descend = useCallback((candidate: FileReferenceCandidate): void => {
-    setDirectory(`${candidate.path}/`)
+  const descend = useCallback((entry: BrowseEntry): void => {
+    // Project paths are slash-terminated to mean "directory"; machine paths are absolute and the
+    // Host joins the separator itself.
+    setDirectory(scope === 'project' ? `${entry.path}/` : entry.path)
+    setFilter('')
+    searchRef.current?.focus()
+  }, [scope])
+
+  const goTo = useCallback((next: string): void => {
+    setDirectory(next)
     setFilter('')
     searchRef.current?.focus()
   }, [])
 
-  const ascend = useCallback((): void => {
-    setDirectory(current => parentDirectory(current))
+  const switchScope = useCallback((next: BrowseScope): void => {
+    setScope(next)
+    setDirectory(browse.start(next))
     setFilter('')
     searchRef.current?.focus()
-  }, [])
+  }, [browse])
 
   /** A row's primary action: select what this mode collects, descend into what it does not. */
-  const activate = useCallback((candidate: FileReferenceCandidate): void => {
-    if (mode === 'files' && candidate.kind === 'directory') descend(candidate)
-    else toggle(candidate)
+  const activate = useCallback((entry: BrowseEntry): void => {
+    if (mode === 'files' && entry.kind === 'directory') descend(entry)
+    else toggle(entry)
   }, [descend, mode, toggle])
 
   const commit = useCallback((): void => {
     const mentions = [...selected.values()]
-      .map(mentionOf)
+      .map(entry => mentionOf({ path: entry.path, kind: entry.kind }))
       .filter((mention): mention is string => mention !== undefined)
     onAdd(mentions)
   }, [onAdd, selected])
@@ -184,10 +189,9 @@ export function AssetPicker({ mode, browse, resultLimit, anchorRef, t, onClose, 
   // composer's own dismissal never sees a click that lands on it.
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent): void => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        onClose()
-      }
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      onClose()
     }
     const onPointerDown = (event: PointerEvent): void => {
       const target = event.target
@@ -207,6 +211,9 @@ export function AssetPicker({ mode, browse, resultLimit, anchorRef, t, onClose, 
     listRef.current?.children[highlight]?.scrollIntoView({ block: 'nearest' })
   }, [highlight])
 
+  const crumbs = level.crumbs
+  const parentCrumb = crumbs.length > 1 ? crumbs[crumbs.length - 2] : undefined
+
   const onSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
     const row = rows[highlight]
     switch (event.key) {
@@ -225,9 +232,9 @@ export function AssetPicker({ mode, browse, resultLimit, anchorRef, t, onClose, 
         descend(row)
         return
       case 'ArrowLeft':
-        if (directory === '' || event.currentTarget.selectionStart !== 0) return
+        if (parentCrumb === undefined || event.currentTarget.selectionStart !== 0) return
         event.preventDefault()
-        ascend()
+        goTo(parentCrumb.directory)
         return
       case 'Enter':
         event.preventDefault()
@@ -240,23 +247,41 @@ export function AssetPicker({ mode, browse, resultLimit, anchorRef, t, onClose, 
     }
   }
 
-  const crumbs = crumbsOf(directory, t('picker.root'))
   const title = t(mode === 'folders' ? 'picker.folders.title' : 'picker.files.title')
+  const placeholder = t(mode === 'folders' ? 'picker.search.folders' : 'picker.search.files')
 
   return createPortal((
     <div
       ref={panelRef}
       className={css.panel}
-      style={style ?? { visibility: 'hidden', left: 0, top: 0, width: WIDTH }}
+      style={style ?? { visibility: 'hidden', left: 0, top: 0, width: WIDTH, height: HEIGHT }}
       role="dialog"
       aria-label={title}
     >
-      <div className={css.header}>
+      <header className={css.header}>
         <span className={css.title}>{title}</span>
-        <button type="button" className={css.close} aria-label={t('picker.close')} onClick={onClose}>
+        <button type="button" className={css.iconButton} aria-label={t('picker.close')} onClick={onClose}>
           <IconCloseOutline16 />
         </button>
-      </div>
+      </header>
+
+      {browse.scopes.length > 1 ? (
+        <div className={css.scopes} role="tablist" aria-label={t('picker.scope')}>
+          {browse.scopes.map(candidate => (
+            <button
+              key={candidate}
+              type="button"
+              role="tab"
+              aria-selected={candidate === scope}
+              className={candidate === scope ? css.scopeOn : css.scope}
+              onClick={() => { switchScope(candidate) }}
+            >
+              {candidate === 'project' ? <ProjectGlyph size={14} /> : <MachineGlyph size={14} />}
+              {t(candidate === 'project' ? 'picker.scope.project' : 'picker.scope.machine')}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <nav className={css.crumbs} aria-label={title}>
         {crumbs.map((crumb, index) => (
@@ -266,7 +291,7 @@ export function AssetPicker({ mode, browse, resultLimit, anchorRef, t, onClose, 
               type="button"
               className={index === crumbs.length - 1 ? css.crumbCurrent : css.crumb}
               disabled={index === crumbs.length - 1}
-              onClick={() => { setDirectory(crumb.directory); setFilter('') }}
+              onClick={() => { goTo(crumb.directory) }}
             >
               {crumb.label}
             </button>
@@ -279,47 +304,49 @@ export function AssetPicker({ mode, browse, resultLimit, anchorRef, t, onClose, 
         className={css.search}
         type="text"
         value={filter}
-        placeholder={t(mode === 'folders' ? 'picker.search.folders' : 'picker.search.files')}
-        aria-label={t(mode === 'folders' ? 'picker.search.folders' : 'picker.search.files')}
+        placeholder={placeholder}
+        aria-label={placeholder}
         onChange={(event) => { setFilter(event.target.value) }}
         onKeyDown={onSearchKeyDown}
       />
 
       <div className={css.body}>
-        {status === 'loading' && rows.length === 0 ? <p className={css.note}>{t('picker.loading')}</p> : null}
-        {status === 'failed' ? <p className={css.noteError} role="status">{t('picker.failed')}</p> : null}
-        {status === 'ready' && rows.length === 0 ? <p className={css.note}>{t('picker.empty')}</p> : null}
         <ul className={css.list} ref={listRef}>
-          {rows.map((candidate, index) => {
-            const isSelected = selected.has(candidate.path)
-            const parent = filter !== '' || directory === '' ? dirnameOf(candidate.path) : ''
+          {rows.map((entry, index) => {
+            const picked = selected.has(entry.path)
+            const selectable = mode === 'folders' || entry.kind === 'file'
             return (
-              <li key={`${candidate.kind}:${candidate.path}`}>
+              <li key={`${entry.kind}:${entry.path}`}>
                 <div className={index === highlight ? css.rowHighlight : css.row}>
                   <button
                     type="button"
                     className={css.rowMain}
-                    aria-pressed={mode === 'folders' || candidate.kind === 'file' ? isSelected : undefined}
+                    aria-pressed={selectable ? picked : undefined}
                     onMouseEnter={() => { setHighlight(index) }}
-                    onClick={() => { activate(candidate) }}
+                    onClick={() => { activate(entry) }}
                   >
-                    <span className={isSelected ? css.checkOn : css.check} aria-hidden>
-                      {candidate.kind === 'directory' ? <IconFolderClose16 /> : <FileGlyph />}
+                    <span className={entry.kind === 'directory' ? css.iconFolder : css.iconFile} aria-hidden>
+                      {entry.kind === 'directory' ? <FolderGlyph size={15} /> : <FileGlyph size={15} />}
                     </span>
                     <span className={css.rowText}>
-                      <span className={css.rowName}>
-                        {basename(candidate.path)}
-                        {candidate.kind === 'directory' ? '/' : ''}
+                      <span className={picked ? css.rowNameOn : css.rowName}>
+                        {entry.name}
+                        {entry.kind === 'directory' ? '/' : ''}
                       </span>
-                      {parent === '' ? null : <span className={css.rowPath}>{parent}</span>}
+                      {entry.parent === '' ? null : <span className={css.rowPath}>{entry.parent}</span>}
                     </span>
+                    {selectable ? (
+                      <span className={picked ? css.tickOn : css.tick} aria-hidden>
+                        {picked ? <IconCheckOutline14 /> : null}
+                      </span>
+                    ) : null}
                   </button>
-                  {candidate.kind === 'directory' && mode === 'folders' ? (
+                  {entry.kind === 'directory' && mode === 'folders' ? (
                     <button
                       type="button"
-                      className={css.enter}
+                      className={css.iconButton}
                       aria-label={t('picker.enter')}
-                      onClick={() => { descend(candidate) }}
+                      onClick={() => { descend(entry) }}
                     >
                       <IconChevronRightOutline14 />
                     </button>
@@ -329,10 +356,24 @@ export function AssetPicker({ mode, browse, resultLimit, anchorRef, t, onClose, 
             )
           })}
         </ul>
-        {truncated ? <p className={css.note}>{t('picker.truncated', { count: rows.length })}</p> : null}
+        {status === 'loading' && rows.length === 0 ? <p className={css.note}>{t('picker.loading')}</p> : null}
+        {status === 'failed'
+          ? <p className={css.noteError} role="status">{failure === '' ? t('picker.failed') : failure}</p>
+          : null}
+        {status === 'ready' && rows.length === 0 ? <p className={css.note}>{t('picker.empty')}</p> : null}
+        {truncated ? <p className={css.noteQuiet}>{t('picker.truncated', { count: rows.length })}</p> : null}
       </div>
 
-      <div className={css.footer}>
+      <footer className={css.footer}>
+        <label className={css.hidden}>
+          <input
+            type="checkbox"
+            className={css.checkbox}
+            checked={showHidden}
+            onChange={(event) => { setShowHidden(event.target.checked) }}
+          />
+          {t('picker.showHidden')}
+        </label>
         <span className={css.count}>{t('picker.selected', { count: selected.size })}</span>
         <button
           type="button"
@@ -345,7 +386,7 @@ export function AssetPicker({ mode, browse, resultLimit, anchorRef, t, onClose, 
         <button type="button" className={css.add} disabled={selected.size === 0} onClick={commit}>
           {selected.size === 0 ? t('picker.add') : t('picker.addCount', { count: selected.size })}
         </button>
-      </div>
+      </footer>
     </div>
   ), document.body)
 }

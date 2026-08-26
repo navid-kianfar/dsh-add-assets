@@ -30,7 +30,7 @@ type Editable = keyof AddAssetsSettings
 
 /** Fields stored as booleans; their controls are two-option selects. */
 const BOOLEAN_FIELDS: readonly Editable[] = [
-  'replaceCommandButton', 'deviceUpload', 'previewDetails',
+  'replaceCommandButton', 'deviceUpload', 'outsideWorkspace', 'previewDetails',
 ]
 
 /** Fields holding a keyboard chord, where the empty string means "no shortcut". */
@@ -64,13 +64,14 @@ function chordInvalid(text: string): boolean {
 }
 
 /**
- * Whether a staged row count could be stored, against the same bounds the Host schema states.
+ * Whether a staged count could be stored, against the same bounds the Host schema states.
  * @param text - the staged text.
+ * @param max - the field's upper bound.
  * @returns true when the value is unusable.
  */
-function limitInvalid(text: string): boolean {
+function countInvalid(text: string, max: number): boolean {
   const parsed = Number(text)
-  return !Number.isSafeInteger(parsed) || parsed < 1 || parsed > 200
+  return !Number.isSafeInteger(parsed) || parsed < 1 || parsed > max
 }
 
 /**
@@ -96,7 +97,8 @@ export function AddAssetsSettingsCard(props: AddAssetsSettingsCardProps) {
   const changed = (Object.keys(draft) as Editable[]).filter(field => draft[field] !== shown({}, value, field))
   const dirty = changed.length > 0
   const invalid = CHORD_FIELDS.some(field => chordInvalid(shown(draft, value, field)))
-    || limitInvalid(shown(draft, value, 'pickerResultLimit'))
+    || countInvalid(shown(draft, value, 'pickerResultLimit'), 200)
+    || countInvalid(shown(draft, value, 'browseMaxEntries'), 5000)
   const writable = settings.writable && value !== undefined
 
   const save = (): void => {
@@ -108,7 +110,7 @@ export function AddAssetsSettingsCard(props: AddAssetsSettingsCardProps) {
       (queue, field) => queue.then(() => {
         const text = draft[field] ?? ''
         if (BOOLEAN_FIELDS.includes(field)) return setField(field, text === 'true')
-        if (field === 'pickerResultLimit') return setField(field, Number(text))
+        if (field === 'pickerResultLimit' || field === 'browseMaxEntries') return setField(field, Number(text))
         return setField(field, text)
       }),
       Promise.resolve(),
@@ -149,6 +151,34 @@ export function AddAssetsSettingsCard(props: AddAssetsSettingsCardProps) {
   )
 
   /**
+   * One whole-number field, refusing a value the Host schema would reject.
+   * @param field - the numeric field.
+   * @param label - the row label's resolved text.
+   * @param max - the field's upper bound.
+   * @returns the labelled field.
+   */
+  const countField = (field: Editable, label: string, max: number) => {
+    const text = shown(draft, value, field)
+    const bad = countInvalid(text, max)
+    return (
+      <label className={css.field}>
+        <div className={css.head}><span className={css.label}>{label}</span></div>
+        <input
+          className={bad ? css.controlInvalid : css.control}
+          type="number"
+          min={1}
+          max={max}
+          inputMode="numeric"
+          disabled={!writable}
+          value={text}
+          onChange={(event) => { edit(field, event.target.value) }}
+        />
+        {bad ? <p className={css.invalid} role="status">{t('settings.invalidNumber', { max })}</p> : null}
+      </label>
+    )
+  }
+
+  /**
    * One chord field, refusing a value the Host would reject.
    * @param field - the chord field.
    * @param label - the row label's resolved text.
@@ -176,7 +206,6 @@ export function AddAssetsSettingsCard(props: AddAssetsSettingsCardProps) {
   }
 
   const title = t('settings.title')
-  const limitText = shown(draft, value, 'pickerResultLimit')
   return (
     <li className={`${css.card} ${open ? css.cardOpen : ''}`}>
       <button
@@ -214,22 +243,17 @@ export function AddAssetsSettingsCard(props: AddAssetsSettingsCardProps) {
               t('settings.deviceUpload.off'),
             )}
 
-            <label className={css.field}>
-              <div className={css.head}><span className={css.label}>{t('settings.pickerResultLimit')}</span></div>
-              <input
-                className={limitInvalid(limitText) ? css.controlInvalid : css.control}
-                type="number"
-                min={1}
-                max={200}
-                inputMode="numeric"
-                disabled={!writable}
-                value={limitText}
-                onChange={(event) => { edit('pickerResultLimit', event.target.value) }}
-              />
-              {limitInvalid(limitText)
-                ? <p className={css.invalid} role="status">{t('settings.invalidNumber')}</p>
-                : null}
-            </label>
+            {countField('pickerResultLimit', t('settings.pickerResultLimit'), 200)}
+
+            <p className={css.group}>{t('settings.scope')}</p>
+            {booleanField(
+              'outsideWorkspace',
+              t('settings.outsideWorkspace'),
+              t('settings.outsideWorkspace.on'),
+              t('settings.outsideWorkspace.off'),
+              t('settings.outsideWorkspace.hint'),
+            )}
+            {countField('browseMaxEntries', t('settings.browseMaxEntries'), 5000)}
 
             <p className={css.group}>{t('settings.shortcuts')}</p>
             {chordField('filesShortcut', t('settings.filesShortcut'))}

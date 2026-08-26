@@ -4,24 +4,77 @@
  */
 
 import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
-import type { FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference/types'
 import type { AddAssetsSettings } from '../host/types.ts'
 
-/** What the plate's two workspace entries need from the Host's file-reference discovery. */
-export interface WorkspaceBrowse {
-  /**
-   * List path candidates for one discovery query.
-   * @param query - path text as it would follow `@`: a query containing `/` lists the directory
-   *   before the last one, filtered by whatever follows it; a query without one fuzzy-searches the
-   *   whole workspace index.
-   * @param signal - aborts the wire call when a newer query supersedes this one.
-   * @returns the candidates, or an empty list when the Host answered with a failure.
-   */
-  list(query: string, signal: AbortSignal): Promise<readonly FileReferenceCandidate[]>
-}
+/**
+ * Where the picker is looking.
+ *
+ * `project` is the session's working directory, served by the Host's file-reference discovery: it
+ * fuzzy-searches an index and refuses every path outside that directory. `machine` is the Host
+ * filesystem, served by this plugin's own endpoint: it lists one level at a time from absolute
+ * paths. The two are different capabilities with different guarantees, which is why the picker
+ * shows which one it is in rather than blending them.
+ */
+export type BrowseScope = 'project' | 'machine'
 
 /** Which of the plate's two workspace entries the picker was opened for. */
 export type PickerMode = 'files' | 'folders'
+
+/** One row of a browsed level, normalized across both scopes. */
+export interface BrowseEntry {
+  /** Basename, which is what the row shows. */
+  readonly name: string
+  /** The path a mention is built from: workspace-relative in `project`, absolute in `machine`. */
+  readonly path: string
+  /** Parent directory shown under the name while searching; `''` suppresses that line. */
+  readonly parent: string
+  readonly kind: 'file' | 'directory'
+  /** Dot-prefixed name; the picker hides these until asked. */
+  readonly hidden: boolean
+}
+
+/** One navigable step of a browsed path. */
+export interface BrowseCrumb {
+  /** Display text. */
+  readonly label: string
+  /** The directory this crumb navigates to, in the scope's own path form. */
+  readonly directory: string
+}
+
+/** One listed level, normalized across both scopes. */
+export interface BrowseLevel {
+  /** Ancestry of the listed directory, root first; the last crumb is the level itself. */
+  readonly crumbs: readonly BrowseCrumb[]
+  /** Rows in display order: directories before files, each name-sorted. */
+  readonly entries: readonly BrowseEntry[]
+  /** True when the SOURCE cut the level; the picker's own row cap is applied separately. */
+  readonly truncated: boolean
+}
+
+/** The picker's data face: which scopes are available, and how to list one level of each. */
+export interface AssetBrowse {
+  /**
+   * Scopes this deployment can actually serve, in the order the picker offers them. A single-entry
+   * roster hides the scope switch entirely rather than showing a control with one choice.
+   */
+  readonly scopes: readonly BrowseScope[]
+  /**
+   * The directory a scope starts at.
+   * @param scope - the scope to open.
+   * @returns the initial directory in that scope's own path form.
+   */
+  start(scope: BrowseScope): string
+  /**
+   * List one level.
+   * @param scope - which capability answers.
+   * @param directory - the directory to list, in that scope's own path form.
+   * @param filter - the text typed into the search field.
+   * @param signal - aborts the wire call when a newer query supersedes this one.
+   * @returns the normalized level.
+   * @throws when the Host refused or could not read the level; the picker says so.
+   */
+  list(scope: BrowseScope, directory: string, filter: string, signal: AbortSignal): Promise<BrowseLevel>
+}
 
 /** Injected share of the composer plate seat. */
 export interface AddAssetsPlateInjected {
@@ -39,8 +92,8 @@ export interface AddAssetsPlateInjected {
    * @param leading - whether the trimmed draft is empty, which the pipeline reads as token position.
    */
   openCommandMenu: ((caret: number, draftRev: number, leading: boolean) => void) | undefined
-  /** Workspace discovery, or undefined when no Host file-reference provider is mounted. */
-  browse: WorkspaceBrowse | undefined
+  /** Path discovery, or undefined when neither scope is available in this deployment. */
+  browse: AssetBrowse | undefined
   /**
    * Hand device files to this session's composer through the attachment seat's own add path.
    * @param files - the chosen files.

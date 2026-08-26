@@ -1,6 +1,6 @@
 /**
- * The draft attachment preview: one card per pending image, the document drop target that adds
- * more, and the full-size preview behind a card.
+ * Everything the draft is carrying, shown above the textarea: a chip per referenced path, a card per
+ * pending image, the document drop target that adds more, and the full-size preview behind a card.
  *
  * It occupies `conversation.input.attachments`, which is a single seat — taking it means owning the
  * drop handling too, since the entry it shadows was the one holding those document listeners.
@@ -15,6 +15,8 @@ import { AttachmentLightbox } from './AttachmentLightbox.tsx'
 import type { LightboxItem } from './AttachmentLightbox.tsx'
 import type { AttachmentPreviewInjected } from './contract.ts'
 import { detailsLine, formatBytes, formatDimensions, formatLabel } from './format.ts'
+import { FileGlyph, FolderGlyph } from './Glyphs.tsx'
+import { basename, dirnameOf, removeMention, scanMentions } from './mention.ts'
 import css from './AttachmentPreview.module.css'
 
 /** Full preview props: the composer's attachment share, the injected settings scope, and the copy. */
@@ -144,9 +146,13 @@ function useFileDrag(canAcceptDrop: boolean, onAddImages: (files: readonly File[
  */
 export function AttachmentPreview({
   attachments, canAcceptDrop, onAddImages, onRemoveImage, dropLimits,
-  sessionId, useAddAssetsSettings, publishIntake, t,
+  sessionId, useInput, inputActions, useAddAssetsSettings, publishIntake, t,
 }: AttachmentPreviewProps) {
   const settings = useAddAssetsSettings(snapshot => snapshot.value)
+  const draft = useInput(state => state.draft) ?? ''
+  // Derived from the draft rather than held beside it: the `@path` text IS the state, so a chip row
+  // scanned from it stays honest when the user edits or deletes a mention by hand.
+  const mentions = useMemo(() => scanMentions(draft), [draft])
   const [openId, setOpenId] = useState<string | null>(null)
   const sizes = useDimensions(attachments)
   const dragging = useFileDrag(canAcceptDrop, onAddImages)
@@ -213,6 +219,38 @@ export function AttachmentPreview({
             ) : null}
           </div>
         </div>
+      )}
+
+      {mentions.length === 0 || inputActions === undefined ? null : (
+        <ul className={css.refs} aria-label={t('reference.group')}>
+          {mentions.map((mention) => {
+            const name = basename(mention.path)
+            const parent = dirnameOf(mention.path)
+            return (
+              <li key={`${mention.start}:${mention.path}`} className={css.ref}>
+                <span className={mention.kind === 'directory' ? css.refIconFolder : css.refIconFile} aria-hidden>
+                  {mention.kind === 'directory' ? <FolderGlyph size={13} /> : <FileGlyph size={13} />}
+                </span>
+                <span className={css.refName} title={mention.path}>
+                  {name}
+                  {mention.kind === 'directory' ? '/' : ''}
+                </span>
+                {parent === '' ? null : <span className={css.refParent} aria-hidden>{parent}</span>}
+                <button
+                  type="button"
+                  className={css.refRemove}
+                  aria-label={t('reference.remove', { name })}
+                  // Both the span and the text come from this render, and a removal re-renders the
+                  // row from the next draft — so a handler never applies a span to a draft it was
+                  // not scanned from, which is what would cut the wrong text.
+                  onClick={() => { inputActions.setDraft(removeMention(draft, mention)) }}
+                >
+                  <IconCloseFill14 />
+                </button>
+              </li>
+            )
+          })}
+        </ul>
       )}
 
       {items.length === 0 ? null : (

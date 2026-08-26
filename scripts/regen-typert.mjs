@@ -1,0 +1,154 @@
+/**
+ * Regenerate `generated/` from a deepseek-harness checkout.
+ *
+ * The Typert generator only runs inside that workspace (it is seeded from the harness's own
+ * `tsconfig.host.json`), and it names artifacts after the workspace package, so this script stages
+ * the Host sources there as `@deepseek-ai/dsh-add-assets`, builds, copies the artifacts back, and
+ * rewrites them onto this package's name. Everything it touches in the harness is restored.
+ *
+ * Two regens must never overlap: they stage into the same harness, and each `finally` runs
+ * `git checkout` on the same three files, so a second restore would revert the first mid-build.
+ *
+ * Usage: node scripts/regen-typert.mjs <path-to-deepseek-harness>
+ */
+import { execFileSync } from 'node:child_process'
+import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { FINGERPRINT_FILE, fingerprint } from './typert-fingerprint.mjs'
+
+const ROOT = fileURLToPath(new URL('..', import.meta.url))
+const HARNESS = process.argv[2]
+/** Package name the harness must use: its path aliases only resolve `@deepseek-ai/dsh-*`. */
+const STAGED = '@deepseek-ai/dsh-add-assets'
+const OWN = '@achasoft/dsh-add-assets'
+const GROUP = 'add-assets'
+const STAGE_DIR = `packages/${GROUP}/${GROUP}`
+/** Harness files this script edits; each is restored from git before it exits. */
+const TOUCHED = ['tsconfig.base.json', 'tsconfig.host.json', 'pnpm-lock.yaml']
+/**
+ * Every workspace package the staged Host sources import. This list and REFERENCES below must stay
+ * complete: a missing project reference makes tsc resolve that package through the path alias to its
+ * SOURCE and compile it inside the staged project, which emits .js/.d.ts next to the harness's own
+ * sources and fails with rootDir errors. Add to both whenever src/host/ gains an import.
+ */
+const PEERS = [
+  '@deepseek-ai/cordis',
+  '@deepseek-ai/dsh-settings',
+  '@deepseek-ai/dsh-typert-protocol',
+]
+/** Project references matching {@link PEERS}, plus the compiler's own prerequisites. */
+const REFERENCES = [
+  '../../../vendor/cosmokit', '../../../vendor/cordis', '../../../vendor/schemastery',
+  '../../settings/settings', '../../typert/protocol',
+]
+/**
+ * Modules outside `src/host/` that the Host half imports, copied in beside it. The staged package is
+ * flat — `src/host/index.ts` becomes `src/index.ts` — so each one's `../` prefix is rewritten to
+ * `./` in EVERY staged host module, not only the entry.
+ */
+const SIBLINGS = ['shortcut.ts']
+
+if (HARNESS === undefined || !existsSync(join(HARNESS, 'tsconfig.host.json'))) {
+  console.error('usage: node scripts/regen-typert.mjs <path-to-deepseek-harness>')
+  process.exit(1)
+}
+const run = (cmd, args, cwd = HARNESS) =>
+  execFileSync(cmd, args, { cwd, stdio: 'inherit', env: process.env })
+
+// A dirty tree would make the restore below indistinguishable from discarding the user's work.
+if (execFileSync('git', ['status', '--porcelain'], { cwd: HARNESS, encoding: 'utf8' }).trim() !== '') {
+  console.error(`refusing to run: ${HARNESS} has uncommitted changes. Commit or stash them first.`)
+  process.exit(1)
+}
+
+const stage = join(HARNESS, STAGE_DIR)
+try {
+  console.log(`staging Host sources into ${STAGE_DIR} as ${STAGED}`)
+  await mkdir(join(stage, 'src'), { recursive: true })
+  await cp(join(ROOT, 'src/host'), join(stage, 'src'), { recursive: true })
+  for (const sibling of SIBLINGS) await cp(join(ROOT, 'src', sibling), join(stage, 'src', sibling))
+  // Flattening moves every host module up one level, so the sibling prefix shifts in all of them.
+  for (const file of await readdir(join(stage, 'src'))) {
+    if (!file.endsWith('.ts')) continue
+    const source = await readFile(join(stage, 'src', file), 'utf8')
+    let rewritten = source
+    for (const sibling of SIBLINGS) rewritten = rewritten.replaceAll(`../${sibling}`, `./${sibling}`)
+    if (rewritten !== source) await writeFile(join(stage, 'src', file), rewritten)
+  }
+
+  const version = JSON.parse(await readFile(join(HARNESS, 'package.json'), 'utf8')).version
+  await writeFile(join(stage, 'package.json'), `${JSON.stringify({
+    name: STAGED, version, private: true, type: 'module',
+    main: 'lib/index.js', types: 'lib/types/index.d.ts',
+    // The generator refuses to emit for a package that does not declare the artifacts in `files`.
+    files: [
+      'lib/index.js', 'lib/types/**/*.js', 'lib/types/**/*.d.ts',
+      'lib/typert.host.js', 'lib/typert.host.d.ts',
+      'lib/typert.remote-client.js', 'lib/typert.remote-client.d.ts',
+    ],
+    exports: {
+      '.': { types: './lib/types/index.d.ts', default: './lib/index.js' },
+      './types': { types: './lib/types/types.d.ts', default: './lib/types/types.js' },
+      './typert': { types: './lib/typert.host.d.ts', default: './lib/typert.host.js' },
+      './remote': { types: './lib/typert.remote-client.d.ts', default: './lib/typert.remote-client.js' },
+    },
+    dependencies: { '@deepseek-ai/schemastery': 'workspace:^' },
+    peerDependencies: Object.fromEntries(PEERS.map(name => [name, 'workspace:^'])),
+    devDependencies: Object.fromEntries(PEERS.map(name => [name, 'workspace:^'])),
+  }, null, 2)}\n`)
+  await writeFile(join(stage, 'tsconfig.json'), `${JSON.stringify({
+    extends: '../../../tsconfig.base.json',
+    compilerOptions: { rootDir: 'src', outDir: 'lib/types' },
+    include: ['src'],
+    references: REFERENCES.map(path => ({ path })),
+  }, null, 2)}\n`)
+
+  // Register the new group so `@deepseek-ai/dsh-add-assets[/types]` resolves, and add the ref.
+  const base = join(HARNESS, 'tsconfig.base.json')
+  let baseText = await readFile(base, 'utf8')
+  baseText = baseText.replace(
+    '        "./packages/todo/*/src",\n',
+    `        "./packages/todo/*/src",\n        "./packages/${GROUP}/*/src",\n`,
+  ).replace(
+    '      "@deepseek-ai/dsh-goal/types":',
+    `      "${STAGED}/types": ["./${STAGE_DIR}/src/types.ts"],\n      "@deepseek-ai/dsh-goal/types":`,
+  )
+  await writeFile(base, baseText)
+  const host = join(HARNESS, 'tsconfig.host.json')
+  await writeFile(host, (await readFile(host, 'utf8')).replace(
+    '    { "path": "./packages/todo/tool-todo" },\n',
+    `    { "path": "./packages/todo/tool-todo" },\n    { "path": "./${STAGE_DIR}" },\n`,
+  ))
+
+  console.log('building the harness Host face (several minutes)')
+  run('pnpm', ['install', '--silent'])
+  run('npx', ['tsc', '-b', 'tsconfig.host.json'])
+  run('npx', ['tsdown', '--env.DSH_BUILD_FACE', 'host'])
+
+  console.log(`copying artifacts back and rewriting onto ${OWN}`)
+  await mkdir(join(ROOT, 'generated'), { recursive: true })
+  for (const file of ['typert.host.js', 'typert.host.d.ts', 'typert.remote-client.js', 'typert.remote-client.d.ts']) {
+    const text = (await readFile(join(stage, 'lib', file), 'utf8'))
+      .replaceAll(`${STAGED}/types`, '../src/host/types.ts')
+      .replaceAll(STAGED, OWN)
+    await writeFile(join(ROOT, 'generated', file), text)
+  }
+  await writeFile(join(ROOT, FINGERPRINT_FILE), `${await fingerprint()}\n`)
+  console.log('done — review `git diff generated/` before committing')
+} finally {
+  console.log('restoring the harness checkout')
+  await rm(stage, { recursive: true, force: true })
+  await rm(join(HARNESS, `packages/${GROUP}`), { recursive: true, force: true })
+  execFileSync('git', ['checkout', '--', ...TOUCHED], { cwd: HARNESS, stdio: 'inherit' })
+  // A misconfigured or interrupted tsc emits .js/.d.ts BESIDE the harness's own sources. Those are
+  // untracked, so nothing above removes them, and they would silently shadow the real modules on
+  // the next build. Sweep exactly that pattern, and only where git agrees the file is untracked.
+  const untracked = execFileSync('git', ['ls-files', '--others', '--exclude-standard'], {
+    cwd: HARNESS, encoding: 'utf8',
+  }).split('\n').filter(line => /\/src\/.*\.(js|d\.ts)(\.map)?$/.test(line))
+  for (const file of untracked) await rm(join(HARNESS, file), { force: true })
+  if (untracked.length > 0) console.log(`swept ${untracked.length} emitted file(s) from the harness sources`)
+  run('pnpm', ['install', '--silent'])
+}

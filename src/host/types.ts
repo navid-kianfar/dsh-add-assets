@@ -1,6 +1,7 @@
 /**
- * The `add-assets` settings section, shared by both halves: the Host owns the schema and the
- * storage, the browser card edits it, and the composer surfaces read it through the bound scope.
+ * The `add-assets` settings section and the Host browse endpoint's wire types, shared by both
+ * halves: the Host owns the schema and the storage, the browser card edits it, and the composer
+ * surfaces read it through the bound scope.
  * @module @achasoft/dsh-add-assets/host/types
  */
 
@@ -23,6 +24,17 @@ export interface AddAssetsSettings {
    * composer attachments. False leaves paste and drop as the only ways to attach an image.
    */
   deviceUpload: boolean
+  /**
+   * Let the picker browse the Host filesystem outside the session's working directory.
+   *
+   * The file-reference provider refuses every path outside that directory, so reaching one at all
+   * means this plugin's own endpoint listing entry NAMES anywhere the Host account can read. It
+   * opens no file, but it does let a browser session enumerate the machine's directory tree — turn
+   * it off for a deployment where that enumeration is itself the thing to withhold.
+   */
+  outsideWorkspace: boolean
+  /** Entries the Host reports per browsed level before reporting the listing as truncated. */
+  browseMaxEntries: number
   /** Chord opening the workspace file picker; empty disables it. See the `shortcut` module's grammar. */
   filesShortcut: string
   /** Chord opening the workspace folder picker; empty disables it. */
@@ -36,3 +48,47 @@ export interface AddAssetsSettings {
   /** Show each attachment's byte size and pixel dimensions beneath its name. */
   previewDetails: boolean
 }
+
+/** One jump target in a browsed path's ancestry. */
+export interface AssetCrumb {
+  /** Display text: the path segment, or the filesystem root for the first crumb. */
+  readonly name: string
+  /** Absolute path this crumb navigates to. */
+  readonly path: string
+}
+
+/** One entry of a browsed Host directory. */
+export interface AssetEntry {
+  /** Basename, which is what a picker row shows. */
+  readonly name: string
+  /** Absolute path on the Host. */
+  readonly path: string
+  /** Symlinks are reported as whatever they resolve to; unresolvable ones are omitted entirely. */
+  readonly kind: 'file' | 'directory'
+  /** Dot-prefixed name. The Host reports these and the browser decides whether to show them. */
+  readonly hidden: boolean
+}
+
+/** One listed level of the Host filesystem. */
+export interface AssetListing {
+  /** Absolute path of the listed directory. */
+  readonly path: string
+  /** The Host account's home directory, so the browser can root a "Home" crumb. */
+  readonly home: string
+  /** Ancestor chain from the filesystem root to {@link AssetListing.path} inclusive. */
+  readonly crumbs: readonly AssetCrumb[]
+  /** Directories first, then files, each name-sorted. */
+  readonly entries: readonly AssetEntry[]
+  /** True when the level had more matching entries than the configured cap reported. */
+  readonly truncated: boolean
+}
+
+/** Settled result of one browse call; failures are values, not exceptions. */
+export type AssetBrowseResult =
+  | { readonly ok: true; readonly listing: AssetListing }
+  | {
+    readonly ok: false
+    /** `disabled`: the deployment turned outside-workspace browsing off. */
+    readonly code: 'disabled' | 'not-a-directory' | 'unreadable'
+    readonly message: string
+  }

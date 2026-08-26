@@ -16,5 +16,5 @@
     "lib": ["es2024", "dom", "dom.iterable"],
     "types": ["node"]
   },
-  "include": ["src", "tests"]
+  "include": ["src", "tests", "generated"]
 }
