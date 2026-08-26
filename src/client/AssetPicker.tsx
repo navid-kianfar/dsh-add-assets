@@ -17,7 +17,6 @@ import {
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { AssetBrowse, BrowseEntry, BrowseLevel, BrowseScope, PickerMode } from './contract.ts'
 import { FileGlyph, FolderGlyph, MachineGlyph, ProjectGlyph } from './Glyphs.tsx'
-import { mentionOf } from './mention.ts'
 import css from './AssetPicker.module.css'
 
 /** Panel geometry, and the distances it keeps from its anchor and from the viewport edges. */
@@ -50,8 +49,8 @@ export interface AssetPickerProps {
   t: TranslateNS<'add-assets'>
   /** Dismiss without adding anything. */
   onClose: () => void
-  /** Commit the selection as ready-to-insert draft mentions, in selection order. */
-  onAdd: (mentions: readonly string[]) => void
+  /** Commit the chosen paths, in selection order; the owner decides how they enter the draft. */
+  onAdd: (paths: readonly { path: string; kind: 'file' | 'directory' }[]) => void
 }
 
 /**
@@ -179,10 +178,7 @@ export function AssetPicker({ mode, browse, resultLimit, anchorRef, t, onClose, 
   }, [descend, mode, toggle])
 
   const commit = useCallback((): void => {
-    const mentions = [...selected.values()]
-      .map(entry => mentionOf({ path: entry.path, kind: entry.kind }))
-      .filter((mention): mention is string => mention !== undefined)
-    onAdd(mentions)
+    onAdd([...selected.values()].map(entry => ({ path: entry.path, kind: entry.kind })))
   }, [onAdd, selected])
 
   // The panel owns Escape and outside pointers itself: it is portalled out of the composer, so the

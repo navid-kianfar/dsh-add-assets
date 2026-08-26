@@ -20,11 +20,12 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { formatShortcut, matchesShortcut, parseShortcut } from '../shortcut.ts'
 import type { Shortcut } from '../shortcut.ts'
 import { AssetPicker } from './AssetPicker.tsx'
+import type { ReferenceInsert } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import type { AddAssetsPlateInjected, PickerMode } from './contract.ts'
 import { caretOf, findComposerTextarea } from './composer-dom.ts'
 import { FileGlyph, FolderGlyph, SlashGlyph, UploadGlyph } from './Glyphs.tsx'
 import { isApplePlatform } from './platform.ts'
-import { appendMentions } from './mention.ts'
+import { appendMentions, labelOf, mentionOf } from './mention.ts'
 import { suppressResidentCommandButton } from './resident-button.ts'
 import css from './AddAssetsPlate.module.css'
 
@@ -37,6 +38,13 @@ const DEVICE_ACCEPT = 'image/png,image/jpeg,image/webp,image/gif'
  * a second before the resolved value lands.
  */
 const DEFAULT_PICKER_ROWS = 20
+
+/**
+ * Source name recorded on every occurrence this plate mints. It must match the trigger source this
+ * plugin registers, because that is where the machine looks for the codec that turns the hidden
+ * `ref` into what the model receives.
+ */
+const REFERENCE_SOURCE = 'add-assets'
 
 /** How long the plate's own failure line stays up before it clears itself. */
 const NOTICE_MS = 4000
@@ -72,8 +80,8 @@ function plateRow(label: string, trailing: string | undefined, muted: boolean): 
  * @returns the `+` button, its plate, and the workspace picker while one is open.
  */
 export function AddAssetsPlate({
-  useInput, inputActions, useAddAssetsSettings, openCommandMenu, browse, attachDeviceFiles,
-  session, t,
+  useInput, inputActions, useAddAssetsSettings, openCommandMenu, browse, insertReference,
+  attachDeviceFiles, session, t,
 }: AddAssetsPlateProps) {
   const settings = useAddAssetsSettings(snapshot => snapshot.value)
   const draft = useInput(state => state.draft)
@@ -85,6 +93,15 @@ export function AddAssetsPlate({
   const [open, setOpen] = useState(false)
   const [picker, setPicker] = useState<PickerMode | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  // References still to place, and a counter that keeps the effect below running while any remain.
+  //
+  // The queue itself is a ref, not state, because placing one reference mutates the input store
+  // SYNCHRONOUSLY: that re-renders this component from the store before a `setQueued` from the same
+  // effect run has been applied, so a state-held queue would still show the item just consumed and
+  // place it a second time — and again, and again. Consuming the head from a ref before the write
+  // is what makes the re-entrant run see the next item instead.
+  const queue = useRef<readonly ReferenceInsert[]>([])
+  const [placing, setPlacing] = useState(0)
 
   // The machine refuses writes while a submission is being adjudicated or sent, and a removed
   // session accepts nothing at all; both make every plate action a write that would be rejected.
@@ -161,11 +178,57 @@ export function AddAssetsPlate({
     return () => { document.removeEventListener('keydown', onKeyDown) }
   }, [apple, chords, locked, run])
 
-  const addMentions = useCallback((mentions: readonly string[]): void => {
+  useEffect(() => {
+    if (placing === 0 || locked) return
+    const next = queue.current[0]
+    if (next === undefined || insertReference === undefined) {
+      queue.current = []
+      setPlacing(0)
+      return
+    }
+    // A reference replaces its span, and appending one to text that does not end in whitespace
+    // would weld it to the previous word. The space is its own transaction; this effect re-runs on
+    // the revision it produces and places the reference then. (The machine adds the SEPARATING
+    // space after a reference itself, so only the leading side needs this.)
+    if (draft !== '' && !/\s$/u.test(draft)) {
+      inputActions.setDraft(`${draft} `)
+      return
+    }
+    queue.current = queue.current.slice(1)
+    // A refused insert means the draft moved under this queue — the person typed while the panel
+    // was settling — so the rest is abandoned rather than placed at offsets that no longer mean
+    // what they meant when the picker computed them.
+    if (!insertReference(next, { start: draft.length, end: draft.length, draftRev })) queue.current = []
+    if (queue.current.length === 0) setPlacing(0)
+  }, [draft, draftRev, inputActions, insertReference, locked, placing])
+
+  const addPaths = useCallback((paths: readonly { path: string; kind: 'file' | 'directory' }[]): void => {
     setPicker(null)
-    if (mentions.length > 0) inputActions.setDraft(appendMentions(draft, mentions))
+    if (paths.length === 0) {
+      focusDraft()
+      return
+    }
+    const mentions = paths.map(entry => mentionOf(entry)).filter((m): m is string => m !== undefined)
+    if (insertReference === undefined) {
+      // No trigger pipeline means no codec to serialize an occurrence, so the draft gets the plain
+      // text a person could have typed instead. It reads longer, and it still resolves.
+      if (mentions.length > 0) inputActions.setDraft(appendMentions(draft, mentions))
+      focusDraft()
+      return
+    }
+    queue.current = paths.flatMap((entry, index) => {
+      const ref = mentions[index]
+      return ref === undefined ? [] : [{
+        source: REFERENCE_SOURCE,
+        ref,
+        label: labelOf(entry.path, entry.kind),
+        appearance: entry.kind === 'directory' ? 'folder' as const : 'file' as const,
+        clipboardText: ref,
+      }]
+    })
+    setPlacing(current => current + 1)
     focusDraft()
-  }, [draft, focusDraft, inputActions])
+  }, [draft, focusDraft, inputActions, insertReference])
 
   const items = useMemo<MenuEntry[]>(() => {
     const chordText = (chord: Shortcut | undefined): string | undefined =>
@@ -258,7 +321,7 @@ export function AddAssetsPlate({
           anchorRef={buttonRef}
           t={t}
           onClose={() => { setPicker(null); focusDraft() }}
-          onAdd={addMentions}
+          onAdd={addPaths}
         />
       )}
     </span>

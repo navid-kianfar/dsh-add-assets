@@ -6,7 +6,7 @@ The harness's own `+` does exactly one thing: it opens the slash-command menu. T
 
 **What makes the picker worth opening rather than typing `@`:** it keeps your selection across directories, searches, and scopes, so three files from three folders go in with one gesture. Folders are a first-class target rather than a step on the way to a file. And it reaches **outside the project** — the harness's own `@` completion cannot, by design.
 
-Everything the draft is carrying then shows above the textarea: referenced paths as removable chips, pending images as cards with format, dimensions, and size, and a full-size preview you can page through and remove from.
+A picked path lands in the draft as an inline chip — `📄 background.ts`, not `@src/background/background.ts` — while the full path rides along hidden and is what reaches the model. Pending images sit above it as cards with format, dimensions, and size, behind a full-size preview you can page through and remove from.
 
 ## Requirements
 
@@ -64,9 +64,13 @@ Selection carries across the switch, so you can take two files from the project 
 
 Keys: `↑`/`↓` move, `Enter` selects or descends, `→` opens a folder, `←` goes up a level, `⌘Enter` adds everything selected, `Esc` closes. The panel's height is fixed, so filtering never moves it under your pointer.
 
-## What the draft is carrying
+## Picked paths are chips, not paths
 
-Referenced paths appear as chips above the textarea: file or folder glyph, name, parent directory, and an `×` that removes the mention from the draft. They are scanned from the draft rather than held beside it, so editing or deleting a `@path` by hand keeps the chips honest.
+A pick becomes an inline reference occurrence: the draft carries a short label the composer renders as a glyph chip, and the full `@path` is the occurrence's hidden serialized form — the same mechanism the harness's own `@` completion uses. So a deeply nested file reads as `📄 background.ts` in the composer while the model still receives `@src/background/background.ts`.
+
+Backspace deletes a chip whole, like any other atomic reference. Where no trigger pipeline is composed there is no codec to serialize an occurrence, so the picker falls back to writing the plain `@path` text a person could have typed — longer to read, identical in effect.
+
+## The attachment preview
 
 Each pending image is a card: a cropped square thumbnail, the file name, and a details line (`PNG · 1024×768 · 240KB`). Hover reveals a remove control; a click opens the full image over a dimmed page, where `←`/`→` page through the rest of the draft's attachments and the trash control removes the one you are looking at.
 
@@ -131,6 +135,7 @@ None; this package neither assembles nor sends a provider request.
 
 - **The resident `+` is hidden, not replaced.** Until the harness declares a slot for that seat, the takeover depends on an accessible signature rather than a contract. It fails visibly (two buttons), never silently.
 - **Machine scope does not search across directories.** The filter narrows the level you are in; the project index is the only thing that searches a tree, and it stops at the workspace root.
+- **Picked paths always append.** A reference goes to the end of the draft rather than the caret, because the picker takes focus while it is open.
 - **The picker's caret is the composer's, but its span is collapsed.** A slash command picked from the plate inserts at the caret and replaces nothing, even if text is selected.
 - **Images only in the preview.** The composer accepts image attachments alone, so a card is always an image card; non-image file cards wait until the composer accepts non-image attachments.
 - **No zoom or download in the full-size preview.** It renders the original at fit-to-viewport size, pages, and removes.

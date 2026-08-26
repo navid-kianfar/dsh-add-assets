@@ -33,8 +33,6 @@ export const zh = {
   'picker.addCount': '添加 {count} 项',
   'picker.truncated': '仅显示前 {count} 项，继续输入可缩小范围。',
 
-  'reference.group': '引用的文件与文件夹',
-  'reference.remove': '移除引用 {name}',
   'attachment.group': '待发送的附件',
   'attachment.open': '查看原图',
   'attachment.remove': '移除 {name}',
@@ -125,8 +123,6 @@ export const en = {
   'picker.addCount': 'Add {count}',
   'picker.truncated': 'Showing the first {count}; keep typing to narrow.',
 
-  'reference.group': 'Referenced files and folders',
-  'reference.remove': 'Remove the reference to {name}',
   'attachment.group': 'Pending attachments',
   'attachment.open': 'View the original',
   'attachment.remove': 'Remove {name}',

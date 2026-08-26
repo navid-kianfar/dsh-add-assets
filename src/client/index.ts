@@ -20,7 +20,9 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 // Type-only: the keyed settings.plugin.item slot declaration.
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
-import type { InputTriggerServiceContract } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
+import type {
+  InputTriggerServiceContract, InputTriggerSource, ReferenceInsert, TokenSpan,
+} from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 // The generated Host-for-Client contract for this plugin's own endpoint. Importing it here — rather
 // than adding a row to the curated api-remotes assembly — is what keeps the capability a plugin: the
 // namespace mounts and unmounts with this fiber, and no shipped source names `addAssets`.
@@ -62,6 +64,28 @@ const NS = 'add-assets'
  */
 const PLATE_ORDER = -10
 
+/**
+ * The sliver of the conversation service this plugin calls.
+ *
+ * `IConversation` exposes `input` as the per-session facade registry, but the resolver type is not
+ * among the package's exports, and the service itself is reached through the optional-service
+ * lookup — an untyped boundary either way. Naming exactly the one method used keeps that cast as
+ * narrow as the call it enables.
+ */
+interface ConversationInputFace {
+  readonly input: {
+    for(actx: ClientContext): { insertReference(reference: ReferenceInsert, span: TokenSpan): boolean }
+  }
+}
+
+/**
+ * Source name this plugin registers with the trigger pipeline, and records on every occurrence the
+ * picker mints. The source contributes no candidates: it exists to own the codec that turns an
+ * occurrence's hidden `ref` into what the model receives, and the roster is the only place a codec
+ * can live.
+ */
+const REFERENCE_SOURCE = 'add-assets'
+
 /** Required services: the slot registry, the copy, the settings scope, and session scope resolution. */
 export const inject = ['slots', 'locale', 'settingsScope', 'sessions', 'remote']
 
@@ -93,6 +117,7 @@ export async function apply(ctx: ClientContext): Promise<void> {
 function surface(ctx: ClientContext): void {
   const scope = ctx.settingsScope.bind<AddAssetsSettings>({ namespace: NS })
   const intake = new ImageIntake()
+  registerReferenceCodec(ctx)
 
   // Shadows the shipped attachment rail (cell shadowing renders the lowest priority). Taking this
   // seat means owning the document drop target too: the entry being shadowed is the one that held
@@ -155,6 +180,7 @@ function registerPlate(
       hooks: { addAssetsSettings: scope },
       openCommandMenu: commandMenuOpener(ctx, sessionId),
       browse: assetBrowse(ctx, sessionId, project, () => scope.getSnapshot().value),
+      insertReference: referenceInserter(ctx, sessionId),
       attachDeviceFiles: files => intake.add(sessionId, files),
     }),
   }, AddAssetsPlate))
@@ -206,6 +232,51 @@ function assetBrowse(
       return machineLevel(answer.value.listing, t('picker.home'))
     },
   }
+}
+
+/**
+ * Register the codec-only trigger source.
+ *
+ * An occurrence is serialized on submit through the codec of the source it names, so a picker that
+ * mints occurrences must put a source on the roster or every send would fail on an unresolvable
+ * reference. This one answers no candidates — the menu renders a ready, empty group as nothing —
+ * because the plate, not typing `@`, is what produces its picks.
+ * @param ctx - the fiber owning the registration.
+ */
+function registerReferenceCodec(ctx: ClientContext): void {
+  const inputTriggers = ctx.get('inputTriggers') as InputTriggerServiceContract | undefined
+  if (inputTriggers === undefined) return
+  const source: InputTriggerSource = {
+    trigger: '@',
+    name: REFERENCE_SOURCE,
+    showGroupTitle: false,
+    candidates: () => Promise.resolve([]),
+    onPick: () => undefined,
+    codec: {
+      // The stored ref IS the `@path` grammar, so both projections are it verbatim: the model reads
+      // the same text a person would have typed, and copying a chip yields that text.
+      clipboardText: ref => ref,
+      serialize: ref => Promise.resolve(ref),
+    },
+  }
+  ctx.effect(() => inputTriggers.registerSource(source), 'add-assets: reference codec')
+}
+
+/**
+ * Bind the occurrence writer for one session.
+ * @param ctx - the fiber holding the conversation and session services.
+ * @param sessionId - the session the plate is mounted for.
+ * @returns the writer, or undefined when no trigger pipeline is composed to serialize occurrences.
+ */
+function referenceInserter(
+  ctx: ClientContext,
+  sessionId: SessionId,
+): ((reference: ReferenceInsert, span: TokenSpan) => boolean) | undefined {
+  if (ctx.get('inputTriggers') === undefined) return undefined
+  const conversation = ctx.get('conversation') as ConversationInputFace | undefined
+  const actx = ctx.sessions.scope(sessionId)
+  if (conversation === undefined || actx === undefined) return undefined
+  return (reference, span) => conversation.input.for(actx).insertReference(reference, span)
 }
 
 /**

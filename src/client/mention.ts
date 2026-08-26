@@ -112,63 +112,16 @@ export function dirnameOf(path: string): string {
   return cut < 0 ? '' : trimmed.slice(0, cut + 1)
 }
 
-/** One `@path` mention found in a draft, with the span that produced it. */
-export interface DraftMention {
-  /** Offset of the `@` in the draft. */
-  readonly start: number
-  /** Offset one past the mention's last character. */
-  readonly end: number
-  /** The workspace-relative or absolute path, unquoted. */
-  readonly path: string
-  /** A trailing slash is what the shared grammar uses to mean "directory". */
-  readonly kind: 'file' | 'directory'
-}
-
 /**
- * Every complete `@path` mention in a draft, in document order.
+ * The short text an inline reference chip shows in the draft.
  *
- * The lookbehind is the same word-boundary rule the shared grammar applies at the caret: an `@`
- * inside another token — an email address, a decorator — is not a mention, and neither is one the
- * user is still typing a quote around.
+ * The draft holds the DISPLAY text of an occurrence while the full `@path` rides along as its
+ * hidden serialized form, so this is what a person reads in the composer: the basename, with the
+ * trailing slash that marks a directory kept.
+ * @param path - the workspace-relative or absolute path.
+ * @param kind - whether the path names a directory.
+ * @returns the label.
  */
-const MENTION = /(?<=^|\s)@(?:"([^"]*)"|([^\s"]+))/gu
-
-/**
- * Scan a draft for the mentions the picker inserts.
- *
- * The draft is the single source of truth for what was added: a chip row derived from it stays
- * correct when the user edits or deletes the text by hand, which a separately held list would not.
- * @param draft - the current draft text.
- * @returns the mentions, in document order.
- */
-export function scanMentions(draft: string): readonly DraftMention[] {
-  const found: DraftMention[] = []
-  for (const match of draft.matchAll(MENTION)) {
-    const path = match[1] ?? match[2]
-    if (path === undefined || path === '') continue
-    found.push({
-      start: match.index,
-      end: match.index + match[0].length,
-      path,
-      kind: path.endsWith('/') ? 'directory' : 'file',
-    })
-  }
-  return found
-}
-
-/**
- * Remove one mention from a draft, taking the separator that went in with it.
- *
- * A mention was inserted with a trailing space, so removing the text alone would leave a double
- * space behind; the leading space is taken instead when the mention ends the draft, which keeps the
- * remaining text from ending in whitespace it did not have before.
- * @param draft - the current draft text.
- * @param mention - the mention to remove, as scanned from this same draft.
- * @returns the next draft.
- */
-export function removeMention(draft: string, mention: DraftMention): string {
-  const after = draft.slice(mention.end)
-  if (after.startsWith(' ')) return draft.slice(0, mention.start) + after.slice(1)
-  const before = draft.slice(0, mention.start)
-  return before.endsWith(' ') ? before.slice(0, -1) + after : before + after
+export function labelOf(path: string, kind: 'file' | 'directory'): string {
+  return kind === 'directory' ? `${basename(path)}/` : basename(path)
 }

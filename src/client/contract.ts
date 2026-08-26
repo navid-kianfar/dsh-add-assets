@@ -4,6 +4,7 @@
  */
 
 import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ReferenceInsert, TokenSpan } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import type { AddAssetsSettings } from '../host/types.ts'
 
 /**
@@ -94,6 +95,19 @@ export interface AddAssetsPlateInjected {
   openCommandMenu: ((caret: number, draftRev: number, leading: boolean) => void) | undefined
   /** Path discovery, or undefined when neither scope is available in this deployment. */
   browse: AssetBrowse | undefined
+  /**
+   * Place one path in the draft as an inline reference occurrence: the draft carries a short label
+   * the composer renders as a glyph chip, while the full `@path` rides along as the occurrence's
+   * hidden serialized form and is what reaches the model.
+   *
+   * Undefined when this deployment composes no trigger pipeline — occurrences are serialized
+   * through a registered source's codec, so without one the picker falls back to writing the plain
+   * `@path` text a person could have typed.
+   * @param reference - the label, the hidden ref, and the glyph domain.
+   * @param span - where to place it, fenced with the draft revision it was read at.
+   * @returns true when the machine applied it; false when the revision moved first.
+   */
+  insertReference: ((reference: ReferenceInsert, span: TokenSpan) => boolean) | undefined
   /**
    * Hand device files to this session's composer through the attachment seat's own add path.
    * @param files - the chosen files.
