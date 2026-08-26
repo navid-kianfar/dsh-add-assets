@@ -1,0 +1,46 @@
+# dsh-add-assets — the composer's "+" options plate and the draft attachment preview.
+#
+# Both rows are always composed. Nothing here needs a credential, a binary, or a
+# provider choice, and every capability the surfaces depend on degrades on its
+# own: without a Host file-reference provider the two workspace rows explain
+# that they are unavailable, and without a trigger pipeline the slash-command
+# row does the same.
+#
+# Override the settings row from your profile's own cordis.patch.yml by `id`,
+# restating every key the row needs — a patch replaces a row's whole `config`.
+- insert:
+    - id: add-assets
+      name: '@achasoft/dsh-add-assets/host'
+      config:
+        # The harness's own "+" opens the slash-command menu directly and no slot
+        # owns it, so leaving ONE "+" in the tool row means hiding that button.
+        # Set false to keep both: the resident one still opens the command menu,
+        # and this plugin's plate sits beside it.
+        replaceCommandButton: true
+
+        # Offer "Upload from this device" under the files entry. Paste and drop
+        # keep working either way; this only adds the explicit chooser.
+        deviceUpload: true
+
+        # mod is Command on macOS and Ctrl elsewhere. Blank disables a shortcut.
+        # These three are deliberately modifier chords: the composer's textarea
+        # owns every bare key, and a plain-key shortcut would eat typing.
+        filesShortcut: mod+u
+        foldersShortcut: mod+shift+u
+        commandShortcut: mod+/
+
+        # Rows the picker renders per query. The Host applies its own, lower cap
+        # (20 by default in dsh-file-reference-local), so raising this alone does
+        # not widen the result set — raise the provider's maxResults with it.
+        pickerResultLimit: 20
+
+        # card = thumbnail, name, and a details line; compact = a small round
+        # thumbnail and the name, for a composer that stays out of the way.
+        previewDensity: card
+        previewDetails: true
+
+    # The BARE package name, deliberately: the Web Client discovers a browser
+    # half by resolving `<row name>/package.json`, so a subpath row here would
+    # leave both composer seats silently unserved.
+    - id: add-assets-ui
+      name: '@achasoft/dsh-add-assets'

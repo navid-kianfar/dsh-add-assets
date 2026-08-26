@@ -1,0 +1,103 @@
+/* The plate's `+` control. It reproduces the resident button's own chrome — 28px selector-filled
+   circle with a primary glyph — because the plate REPLACES that button: a differently shaped control
+   in its place would read as a second, unrelated affordance rather than the same one with more to
+   offer. Every colour is an alias token; none is a literal. */
+
+.seat {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* The tool row renders slot entries AFTER its resident chrome, but the button this plate replaces
+   led that row. Flex order restores the seat to the front, so taking over the `+` does not also move
+   it across the mode chips. Applied only while the resident button is hidden: with both visible,
+   the plate belongs after the one it sits beside. */
+.seatLeading {
+  composes: seat;
+  order: -1;
+}
+
+.add {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 999px;
+  background: var(--dsw-specific-selector);
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+}
+
+.add:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover-solid);
+}
+
+.add:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.add:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 2px;
+}
+
+/* One plate row: label left, chord right. The gap is a minimum, not a layout — a long label wins
+   the space and truncates, while the chord keeps its full width. */
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.rowLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowChord {
+  flex: none;
+  font-size: 11px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
+}
+
+/* A disabled row says WHY rather than showing a key it would not answer to. It is caption-sized so
+   the eye reads it as an annotation on the row, not as a second action. */
+.rowNote {
+  composes: rowChord;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fileInput {
+  display: none;
+}
+
+/* The plate's own failure line. It floats above the tool row rather than joining it: the row is a
+   fixed 28px band of controls, and a text node inside it would push the send button off the line. */
+.notice {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 60;
+  max-width: 260px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: var(--dsw-alias-toast-bg);
+  box-shadow: var(--dsw-shadow-lv2);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-state-error-primary);
+  white-space: normal;
+}

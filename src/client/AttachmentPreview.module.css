@@ -1,0 +1,198 @@
+/* Draft attachment cards. They sit inside the composer card above the textarea, so the surface they
+   paint on is the input's own fill: the card reads as a chip laid ON the composer, one elevation
+   step up from it, rather than as a panel of its own. Every colour is an alias token. */
+
+.rail {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  min-width: 0;
+  padding: 8px 12px 0;
+}
+
+.railCompact {
+  composes: rail;
+  gap: 6px;
+  padding-top: 6px;
+}
+
+.card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  max-width: 260px;
+  min-width: 0;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-2);
+  transition: border-color .16s;
+}
+
+.chip {
+  composes: card;
+  max-width: 200px;
+  border-radius: 999px;
+}
+
+.card:hover {
+  border-color: var(--dsw-alias-label-dimmed);
+}
+
+.body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 26px 6px 6px;
+  border: none;
+  border-radius: inherit;
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+
+.body:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: -2px;
+}
+
+/* A fixed square that crops rather than letterboxes: a row of same-size thumbnails is scannable in
+   a way a row of aspect-correct ones is not, and the full frame is one click away. */
+.thumb {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--dsw-alias-bg-skeleton);
+}
+
+.thumbCompact {
+  composes: thumb;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+}
+
+.meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.name {
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.details {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Inside the card's top-right corner, revealed on hover or keyboard focus. */
+.remove {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 999px;
+  background: var(--dsw-alias-button-floating-fill);
+  color: var(--dsw-alias-label-secondary);
+  box-shadow: var(--dsw-shadow-lv1);
+  opacity: 0;
+  cursor: pointer;
+}
+
+.card:hover .remove,
+.remove:focus-visible {
+  opacity: 1;
+}
+
+.remove:hover {
+  background: var(--dsw-alias-interactive-bg-hover-danger);
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.remove:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+
+/* Touch surfaces have no hover to reveal it with, so there the control is always shown. */
+@media (pointer: coarse) {
+  .remove {
+    opacity: 1;
+  }
+}
+
+.dropRoot {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  /* The layer only STATES that a drop is welcome; the document listeners underneath decide and
+     perform it, so nothing here may intercept the pointer. */
+  pointer-events: none;
+}
+
+.dropMask {
+  position: absolute;
+  inset: 0;
+  background: var(--dsw-alias-bg-mask-drop);
+  backdrop-filter: var(--dsw-mask-blur);
+}
+
+.dropCard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 28px 40px;
+  border: 2px dashed var(--dsw-alias-brand-primary);
+  border-radius: 16px;
+  background: var(--dsw-alias-bg-layer-2);
+  box-shadow: var(--dsw-shadow-lv3);
+  text-align: center;
+}
+
+.dropCardBlocked {
+  composes: dropCard;
+  border-color: var(--dsw-alias-label-dimmed);
+}
+
+.dropTitle {
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.dropLimits {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
