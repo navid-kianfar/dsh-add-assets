@@ -60,7 +60,6 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
     "@deepseek-ai/dsh-file-reference": "*",
-    "@deepseek-ai/dsh-settings": "*",
     "@deepseek-ai/schemastery": "*",
     "@deepseek-ai/dsh-typert-protocol": "*"
   },
