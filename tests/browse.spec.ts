@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { machineCrumbs, machineLevel, projectLevel } from '../src/client/browse.ts'
+import {
+  availableScopes, machineCrumbs, machineLevel, machineRequest, projectLevel,
+} from '../src/client/browse.ts'
 import type { AssetListing } from '../src/host/types.ts'
 
 /** A Host listing with the fields these functions read. */
@@ -53,36 +55,90 @@ describe('projectLevel', () => {
 })
 
 describe('machineCrumbs', () => {
-  it('collapses the account home to one step', () => {
+  it('runs from the filesystem root, so every ancestor of the home stays one click away', () => {
     expect(machineCrumbs(listing({}), 'Home')).toEqual([
+      { label: '/', directory: '/' },
+      { label: 'Users', directory: '/Users' },
       { label: 'Home', directory: '/Users/me' },
       { label: 'code', directory: '/Users/me/code' },
     ])
   })
 
-  it('is the home crumb alone at the home directory itself', () => {
+  it('labels the home crumb at the home directory itself', () => {
     const at = listing({ path: '/Users/me', crumbs: listing({}).crumbs.slice(0, 3) })
-    expect(machineCrumbs(at, 'Home')).toEqual([{ label: 'Home', directory: '/Users/me' }])
+    expect(machineCrumbs(at, 'Home').map(crumb => crumb.label)).toEqual(['/', 'Users', 'Home'])
   })
 
-  it('keeps the full chain for a path outside the home', () => {
-    const outside = listing({
-      path: '/etc/nginx',
-      crumbs: [{ name: '/', path: '/' }, { name: 'etc', path: '/etc' }, { name: 'nginx', path: '/etc/nginx' }],
+  it('names a directory reached above the home plainly', () => {
+    const tmp = listing({
+      path: '/tmp/shots',
+      crumbs: [{ name: '/', path: '/' }, { name: 'tmp', path: '/tmp' }, { name: 'shots', path: '/tmp/shots' }],
     })
-    expect(machineCrumbs(outside, 'Home')).toEqual([
+    expect(machineCrumbs(tmp, 'Home')).toEqual([
       { label: '/', directory: '/' },
-      { label: 'etc', directory: '/etc' },
-      { label: 'nginx', directory: '/etc/nginx' },
+      { label: 'tmp', directory: '/tmp' },
+      { label: 'shots', directory: '/tmp/shots' },
     ])
   })
 
-  it('does not mistake a sibling of the home for a child of it', () => {
+  it('does not mistake a sibling of the home for the home', () => {
     const sibling = listing({
       path: '/Users/meadow',
       crumbs: [{ name: '/', path: '/' }, { name: 'Users', path: '/Users' }, { name: 'meadow', path: '/Users/meadow' }],
     })
-    expect(machineCrumbs(sibling, 'Home')[0]).toEqual({ label: '/', directory: '/' })
+    expect(machineCrumbs(sibling, 'Home').map(crumb => crumb.label)).toEqual(['/', 'Users', 'meadow'])
+  })
+
+  it('labels a Windows home the same way', () => {
+    const windows = listing({
+      path: 'C:\\Users\\me',
+      home: 'C:\\Users\\me',
+      crumbs: [
+        { name: 'C:\\', path: 'C:\\' }, { name: 'Users', path: 'C:\\Users' }, { name: 'me', path: 'C:\\Users\\me' },
+      ],
+    })
+    expect(machineCrumbs(windows, 'Home').map(crumb => crumb.label)).toEqual(['C:\\', 'Users', 'Home'])
+  })
+})
+
+describe('machineRequest', () => {
+  it('filters the browsed level by an ordinary name', () => {
+    expect(machineRequest('/Users/me', 'rep')).toEqual({ path: '/Users/me', query: 'rep' })
+    expect(machineRequest('', '')).toEqual({ path: '', query: '' })
+  })
+
+  it('lists a typed absolute path, filtered by what follows its last separator', () => {
+    expect(machineRequest('/Users/me', '/tmp/')).toEqual({ path: '/tmp/', query: '' })
+    expect(machineRequest('/Users/me', '/tmp/sho')).toEqual({ path: '/tmp/', query: 'sho' })
+    expect(machineRequest('/Users/me', '/')).toEqual({ path: '/', query: '' })
+    expect(machineRequest('/Users/me', '  /opt')).toEqual({ path: '/', query: 'opt' })
+  })
+
+  it('hands the tilde forms to the Host, which alone knows its home', () => {
+    expect(machineRequest('/tmp', '~')).toEqual({ path: '~', query: '' })
+    expect(machineRequest('/tmp', '~/Down')).toEqual({ path: '~/', query: 'Down' })
+    // Not a path: a name that happens to start with a tilde.
+    expect(machineRequest('/tmp', '~backup')).toEqual({ path: '/tmp', query: '~backup' })
+  })
+
+  it('splits a Windows path on either separator, and only a Windows path', () => {
+    expect(machineRequest('C:\\', 'D:\\data\\re')).toEqual({ path: 'D:\\data\\', query: 're' })
+    expect(machineRequest('C:\\', 'D:/data/re')).toEqual({ path: 'D:/data/', query: 're' })
+    // On POSIX a backslash is an ordinary name character.
+    expect(machineRequest('/Users/me', '/tmp/a\\b')).toEqual({ path: '/tmp/', query: 'a\\b' })
+  })
+})
+
+describe('availableScopes', () => {
+  it('offers project discovery when the fiber has it, and the machine unless turned off', () => {
+    expect(availableScopes(true, { outsideWorkspace: true })).toEqual(['project', 'machine'])
+    expect(availableScopes(true, { outsideWorkspace: false })).toEqual(['project'])
+    expect(availableScopes(false, { outsideWorkspace: true })).toEqual(['machine'])
+    expect(availableScopes(false, { outsideWorkspace: false })).toEqual([])
+  })
+
+  it('offers the machine while the section has not resolved, as the composition default does', () => {
+    expect(availableScopes(false, undefined)).toEqual(['machine'])
   })
 })
 

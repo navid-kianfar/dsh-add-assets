@@ -103,19 +103,25 @@ Everything below is editable at **Settings → Plugins → Add assets**, and can
 | `replaceCommandButton` | Hide the composer's own `+` so this plugin's plate is the only one. See the note below. |
 | `deviceUpload` | Offer the device file chooser under the files entry. Paste and drop work either way. |
 | `outsideWorkspace` | Let the picker leave the project. See the note below. |
-| `browseMaxEntries` | Entries the Host reports per browsed level, 1–5000. A home directory is well past this; the picker says it truncated and the search field is how you get past it. |
-| `filesShortcut`, `foldersShortcut`, `commandShortcut` | Chords like `mod+u`, `mod+shift+u`, `mod+/`. `mod` is Command on macOS and Ctrl elsewhere. Blank disables one. A chord the browser could not match is refused at load, naming the field. |
+| `browseMaxEntries` | Entries the Host reports per browsed level, 1–2000 (the ceiling is schema-enforced, so a browser settings write cannot lift it). A home directory is well past the default; the picker says it truncated, and the search field or a typed path is how you get past it. |
+| `filesShortcut`, `foldersShortcut`, `commandShortcut` | Chords like `mod+u`, `mod+shift+u`, `mod+/`. `mod` is Command on macOS and Ctrl elsewhere. Blank disables one. Every chord needs `mod` or `alt` — shift alone does not count. A chord the browser could not match, or one without a modifier, is refused at load, naming the field. |
 | `pickerResultLimit` | Rows the picker renders per query, 1–200. The Host applies its own, lower cap (20 by default), so raising this alone does not widen results — raise the file-reference provider's `maxResults` with it. |
 | `previewDensity` | `card` (thumbnail, name, details) or `compact` (small round thumbnail and name). |
 | `previewDetails` | Whether the details line shows format, dimensions, and size. |
 
-Shortcuts are deliberately modifier chords: the composer's textarea owns every bare key, and a plain-key shortcut would eat your typing.
+Shortcuts are deliberately modifier chords: they listen on the whole page, so a plain-key shortcut (`/`, `u`, `enter`, or `shift+u`) would eat that key in every text field. The browser ignores such a chord even if one reaches it.
 
 ### About `outsideWorkspace`
 
 The harness's file-reference provider refuses every path outside the session's working directory — `resolveDisplayDirectory` rejects `..` and symlinks outright — and the Workspace directory browser returns directories only. So reaching a **file** outside the project needs an endpoint of this plugin's own, and that is what the `addAssets/browse` Remote is.
 
-It reports entry **names**, kinds, and absolute paths for any directory the Host account can read. It never opens a file, and it never returns contents. What it does add over what the harness already exposes is the ability to enumerate the machine's tree from a browser session, including file names. Set it to `false` where that enumeration is itself the thing to withhold; the picker then opens in Project scope alone and the scope switch disappears rather than showing one choice.
+It reports entry **names**, kinds, and absolute paths for any directory the Host account can read. It never opens a file, and it never returns contents. Setting it to `false` makes the picker open in Project scope alone, and the scope switch disappears rather than showing one choice. The change applies to an open composer without a reload.
+
+**This is a preference, not a security boundary.** The value in `cordis.patch.yml` is only the starting point: anyone using the Web Client can turn it back on from the plugin settings tab. That is by design — the person in that browser is the authenticated operator, whose agent can already run shell commands on the Host, so listing file names adds nothing they could not already get. If a deployment's browser users must not see the machine's directory tree, do not compose this plugin (or a shell-capable agent) for them; `outsideWorkspace: false` will not stop them.
+
+In machine scope the crumbs run from the filesystem root, with your home directory labelled **Home**, so `/tmp`, `/Volumes`, or `/opt` are one click up. You can also type a path into the search field — `/tmp/`, `~/Downloads/re`, or `C:\Users\` on Windows — and the picker lists that directory filtered by whatever follows the last separator. On Windows only drive-qualified paths are accepted; UNC (`\\server\share`) and drive-less (`\foo`) paths are refused.
+
+A level is read as a stream and only a bounded window of `browseMaxEntries` entries is ever held: directories first, then files, each name-sorted **within that window**. In a directory larger than the cap, the window is the name-first entries of each kind (real directories take precedence over files; a symlink is placed by name among the files until it is resolved), and the picker says the level was truncated.
 
 ### About `replaceCommandButton`
 
@@ -145,9 +151,11 @@ None; this package neither assembles nor sends a provider request.
 
 ```bash
 pnpm run typecheck
-pnpm run test       # the Typert freshness check, then vitest
 pnpm run build      # tsc emit → tsdown's two halves (lib/host.js, lib/client.js)
+pnpm run test       # the Typert freshness check, then vitest
 ```
+
+Build before testing: `tests/client-bundle.spec.ts` renders the built `lib/client.js` under the installed harness's props, and it fails — naming the fix — when that bundle is missing or older than `src/`.
 
 The `link:` devDependencies point at a sibling `deepseek-harness` checkout, which supplies the types and the built `lib/` this package compiles against. The build reproduces the two artifact formats the harness's own (unpublished) client preset emits; `tsdown.config.ts` documents why each one is shaped the way it is.
 

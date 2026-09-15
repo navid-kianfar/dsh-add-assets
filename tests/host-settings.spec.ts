@@ -36,7 +36,8 @@ describe('Config', () => {
 
   it('refuses a level cap the Host would not honour', () => {
     expect(() => Config({ ...COMPLETE, browseMaxEntries: 0 })).toThrow()
-    expect(() => Config({ ...COMPLETE, browseMaxEntries: 5001 })).toThrow()
+    expect(() => Config({ ...COMPLETE, browseMaxEntries: 2001 })).toThrow()
+    expect(Config({ ...COMPLETE, browseMaxEntries: 2000 }).browseMaxEntries).toBe(2000)
   })
 
   it('refuses a preview density it draws no cards for', () => {
@@ -59,5 +60,11 @@ describe('validateAddAssetsSettings', () => {
       .toThrow(/foldersShortcut/)
     expect(() => { validateAddAssetsSettings({ ...COMPLETE, commandShortcut: 'mod+nope' }) })
       .toThrow(/commandShortcut/)
+  })
+
+  it('rejects a chord with no mod or alt, which would block that key while typing', () => {
+    expect(() => { validateAddAssetsSettings({ ...COMPLETE, filesShortcut: '/' }) }).toThrow(/filesShortcut/)
+    expect(() => { validateAddAssetsSettings({ ...COMPLETE, foldersShortcut: 'shift+u' }) }).toThrow(/foldersShortcut/)
+    expect(() => { validateAddAssetsSettings({ ...COMPLETE, commandShortcut: 'enter' }) }).toThrow(/commandShortcut/)
   })
 })

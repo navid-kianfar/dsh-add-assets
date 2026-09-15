@@ -25,19 +25,27 @@
         # Let the picker leave the session's working directory. The Host's own
         # file-reference provider refuses every path outside it, so this is served
         # by this plugin's endpoint, which lists entry NAMES in any directory the
-        # Host account can read. It opens no file — but it does let a browser
-        # session enumerate the machine's directory tree, so set it false for a
-        # deployment where that enumeration is itself the thing to withhold.
+        # Host account can read. It opens no file.
+        #
+        # This is a PREFERENCE, not a security boundary: it is only the starting
+        # value, and anyone using the Web Client can flip it on the settings tab.
+        # That person is the authenticated operator, whose agent can already run
+        # shell commands on this machine. If browser users must not see the
+        # directory tree, do not compose this plugin (or a shell-capable agent)
+        # for them — setting false here will not stop them.
         outsideWorkspace: true
 
-        # Entries the Host reports per browsed level before saying it truncated.
-        # A home directory or a node_modules is well past this; the picker says so
-        # and the search field is how you get past it.
+        # Entries the Host reports per browsed level before saying it truncated,
+        # 1–2000. The ceiling is enforced by the schema, so a settings write from
+        # the browser cannot lift it. A home directory or a node_modules is well
+        # past the default; the picker says so, and the search field (or typing a
+        # path) is how you get past it.
         browseMaxEntries: 500
 
         # mod is Command on macOS and Ctrl elsewhere. Blank disables a shortcut.
-        # These three are deliberately modifier chords: the composer's textarea
-        # owns every bare key, and a plain-key shortcut would eat typing.
+        # Every chord needs mod or alt (shift alone does not count) and one
+        # without is refused at load: the chords listen on the whole page, and a
+        # plain-key shortcut would eat that key in every text field.
         filesShortcut: mod+u
         foldersShortcut: mod+shift+u
         commandShortcut: mod+/

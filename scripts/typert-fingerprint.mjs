@@ -14,7 +14,9 @@ import { fileURLToPath } from 'node:url'
  * Sources the generator reads: the `@Remote` methods, every type they name, and every module the
  * staged Host half imports — a change in any of them can move the wire schema.
  */
-export const TYPERT_INPUTS = ['src/host/index.ts', 'src/host/types.ts', 'src/host/browse.ts', 'src/shortcut.ts']
+export const TYPERT_INPUTS = [
+  'src/host/index.ts', 'src/host/types.ts', 'src/host/browse.ts', 'src/host/limits.ts', 'src/shortcut.ts',
+]
 
 /** Where the recorded fingerprint lives. */
 export const FINGERPRINT_FILE = 'generated/.fingerprint'

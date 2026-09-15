@@ -10,9 +10,9 @@
  */
 
 import type { FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference/types'
-import type { AssetListing } from '../host/types.ts'
-import type { BrowseCrumb, BrowseEntry, BrowseLevel } from './contract.ts'
-import { basename, crumbsOf, dirnameOf } from './mention.ts'
+import type { AddAssetsSettings, AssetListing } from '../host/types.ts'
+import type { BrowseCrumb, BrowseEntry, BrowseLevel, BrowseScope } from './contract.ts'
+import { basename, crumbsOf, dirnameOf, lastSeparator } from './mention.ts'
 
 /**
  * Normalize a project-scope answer.
@@ -52,27 +52,67 @@ export function projectLevel(
 }
 
 /**
- * Machine-scope crumbs, with the Host account's home collapsed to one step.
+ * Machine-scope crumbs: the whole chain from the filesystem root, with the Host account's home
+ * labelled as such.
  *
- * A path under the home directory is five or six crumbs of noise before anything the user
- * recognizes; rooting it at "Home" is what makes the trail readable on a normal machine, and the
- * full chain is still there for anything outside it.
+ * The chain is never cut at the home. A trail rooted at "Home" reads well on a normal machine, but
+ * it leaves `/tmp`, `/Volumes`, or `/opt` with no crumb to reach them by; the root and every
+ * ancestor of the home stay one click away instead, and the home crumb's label is what keeps the
+ * familiar step recognizable. (The trail scrolls rather than wraps, so the extra steps cost width,
+ * not layout.)
  * @param listing - the Host's answer, whose crumbs run from the filesystem root.
  * @param homeLabel - display text for the home crumb.
- * @returns the trail, root or home first.
+ * @returns the trail, root first.
  */
 export function machineCrumbs(listing: AssetListing, homeLabel: string): readonly BrowseCrumb[] {
-  const { home } = listing
-  const underHome = home !== '' && (listing.path === home || listing.path.startsWith(`${home}/`))
-  if (!underHome) {
-    return listing.crumbs.map(crumb => ({ label: crumb.name, directory: crumb.path }))
-  }
-  const trail: BrowseCrumb[] = [{ label: homeLabel, directory: home }]
-  for (const crumb of listing.crumbs) {
-    if (crumb.path === home || !crumb.path.startsWith(`${home}/`)) continue
-    trail.push({ label: crumb.name, directory: crumb.path })
-  }
-  return trail
+  return listing.crumbs.map(crumb => ({
+    label: listing.home !== '' && crumb.path === listing.home ? homeLabel : crumb.name,
+    directory: crumb.path,
+  }))
+}
+
+/**
+ * A search-field entry that names a path rather than a name fragment: absolute, drive-qualified, or
+ * the Host home (`~` alone or followed by a separator — `~backup` is a name).
+ */
+const TYPED_PATH = /^(?:\/|[A-Za-z]:[\\/]|~(?:[\\/]|$))/u
+
+/**
+ * What to ask the Host for, given the browsed directory and the search field.
+ *
+ * Typing a path browses to it, exactly as the project scope's discovery reads a query containing a
+ * `/`: the part up to the last separator is the directory to list and what follows filters it. That
+ * is what the field's placeholder has always promised, and it is the way to a directory no crumb
+ * names — including `~` back home from `/tmp`.
+ * @param directory - the browsed directory; `''` is the Host home.
+ * @param filter - the search field's text.
+ * @returns the path and name filter for the browse endpoint.
+ */
+export function machineRequest(directory: string, filter: string): { readonly path: string; readonly query: string } {
+  const typed = filter.trimStart()
+  if (!TYPED_PATH.test(typed)) return { path: directory, query: filter }
+  const cut = lastSeparator(typed)
+  if (cut < 0) return { path: typed, query: '' }
+  return { path: typed.slice(0, cut + 1), query: typed.slice(cut + 1) }
+}
+
+/**
+ * The scopes the picker can offer right now.
+ *
+ * Computed from the live settings value on every render rather than once when the seat is
+ * injected: the slot renderer caches a seat's injected share per session, so a roster frozen there
+ * would ignore an `outsideWorkspace` change until a reload.
+ * @param project - whether this fiber can reach project discovery, fixed for the fiber's life.
+ * @param settings - the resolved section, or undefined before it resolves.
+ * @returns the roster, project first; empty when neither scope can answer.
+ */
+export function availableScopes(
+  project: boolean,
+  settings: Pick<AddAssetsSettings, 'outsideWorkspace'> | undefined,
+): readonly BrowseScope[] {
+  const machine = settings?.outsideWorkspace !== false
+  if (project) return machine ? ['project', 'machine'] : ['project']
+  return machine ? ['machine'] : []
 }
 
 /**

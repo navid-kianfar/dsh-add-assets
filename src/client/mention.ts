@@ -26,6 +26,36 @@ export function mentionOf(candidate: FileReferenceCandidate): string | undefined
   return mention.startsWith('@"') && !mention.endsWith('"') ? `${mention}"` : mention
 }
 
+/** One path the picker handed back: what a mention and a chip are both built from. */
+export interface PickedPath {
+  readonly path: string
+  readonly kind: 'file' | 'directory'
+}
+
+/** A pick together with the mention made from it. */
+export interface PathReference {
+  readonly entry: PickedPath
+  readonly mention: string
+}
+
+/**
+ * Make each pick's mention and keep the two together.
+ *
+ * They are paired BEFORE anything is dropped. Filtering the mentions on their own and then looking
+ * them up by the pick's index shifts every mention after an unrepresentable path onto the wrong
+ * pick: a chip labelled `budget.xlsx` would send `@…/archive/`. The count of dropped picks is
+ * returned so the person is told, rather than finding one missing from the draft.
+ * @param paths - the picks, in the order chosen.
+ * @returns the representable picks with their mentions, in order, and how many were skipped.
+ */
+export function pairMentions(paths: readonly PickedPath[]): { readonly references: readonly PathReference[]; readonly skipped: number } {
+  const references = paths.flatMap((entry): PathReference[] => {
+    const mention = mentionOf(entry)
+    return mention === undefined ? [] : [{ entry, mention }]
+  })
+  return { references, skipped: paths.length - references.length }
+}
+
 /**
  * Append mentions to a draft as the user would have typed them: separated by single spaces, with a
  * trailing space so the caret lands ready for the next word.
@@ -55,17 +85,6 @@ export function browseQuery(directory: string, filter: string): string {
   return directory + filter.trimStart()
 }
 
-/**
- * The directory one level above a browsed directory.
- * @param directory - slash-terminated directory, or `''` at the root.
- * @returns the parent, slash-terminated, or `''` when the parent is the root.
- */
-export function parentDirectory(directory: string): string {
-  const trimmed = directory.endsWith('/') ? directory.slice(0, -1) : directory
-  const cut = trimmed.lastIndexOf('/')
-  return cut < 0 ? '' : trimmed.slice(0, cut + 1)
-}
-
 /** One breadcrumb step: what to show, and the directory it navigates to. */
 export interface Crumb {
   /** Display text; the root's label is supplied by the caller from its dictionary. */
@@ -91,25 +110,54 @@ export function crumbsOf(directory: string, rootLabel: string): readonly Crumb[]
 }
 
 /**
+ * A path in Windows form: drive-qualified, or the Host home followed by a backslash.
+ *
+ * The browser cannot ask which platform the Host runs, but a machine-scope path says so itself —
+ * the Host only ever reports and accepts drive-qualified paths on Windows. Project paths never
+ * match: discovery reports them workspace-relative and always slash-separated.
+ */
+const WINDOWS_PATH = /^(?:[A-Za-z]:[\\/]|~\\)/u
+
+/**
+ * Index of the last separator in a path.
+ *
+ * Both separators count on a Windows path, where the Host accepts either. Only `/` counts
+ * otherwise, because on POSIX a backslash is an ordinary character a file name may contain.
+ * @param path - a workspace-relative path, a Host path, or a typed one.
+ * @returns the index, or -1 when the path has no separator.
+ */
+export function lastSeparator(path: string): number {
+  const slash = path.lastIndexOf('/')
+  return WINDOWS_PATH.test(path) ? Math.max(slash, path.lastIndexOf('\\')) : slash
+}
+
+/**
+ * A path without its trailing separator, which marks a directory and is not part of any segment.
+ * @param path - any path the picker handles.
+ * @returns the path, one trailing separator removed.
+ */
+function withoutTrailingSeparator(path: string): string {
+  return path.length > 0 && lastSeparator(path) === path.length - 1 ? path.slice(0, -1) : path
+}
+
+/**
  * The last path segment, which is what a picker row shows.
- * @param path - a workspace-relative path, with or without a trailing slash.
+ * @param path - a workspace-relative or Host path, with or without a trailing separator.
  * @returns the final segment; `''` only for an empty path.
  */
 export function basename(path: string): string {
-  const trimmed = path.endsWith('/') ? path.slice(0, -1) : path
-  const cut = trimmed.lastIndexOf('/')
-  return cut < 0 ? trimmed : trimmed.slice(cut + 1)
+  const trimmed = withoutTrailingSeparator(path)
+  return trimmed.slice(lastSeparator(trimmed) + 1)
 }
 
 /**
  * The directory part of a path, which is what a picker row shows under the name while searching.
  * @param path - a workspace-relative path.
- * @returns the parent directory, slash-terminated, or `''` when the path sits at the root.
+ * @returns the parent directory, separator-terminated, or `''` when the path sits at the root.
  */
 export function dirnameOf(path: string): string {
-  const trimmed = path.endsWith('/') ? path.slice(0, -1) : path
-  const cut = trimmed.lastIndexOf('/')
-  return cut < 0 ? '' : trimmed.slice(0, cut + 1)
+  const trimmed = withoutTrailingSeparator(path)
+  return trimmed.slice(0, lastSeparator(trimmed) + 1)
 }
 
 /**

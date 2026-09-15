@@ -16,6 +16,7 @@ import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-cli
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import type { AddAssetsSettings } from '../host/types.ts'
 import { parseShortcut } from '../shortcut.ts'
+import { BROWSE_MAX_ENTRIES_LIMIT, PICKER_RESULT_LIMIT } from '../host/limits.ts'
 import type { AddAssetsSettingsInjected } from './contract.ts'
 import css from './AddAssetsSettingsCard.module.css'
 
@@ -97,8 +98,8 @@ export function AddAssetsSettingsCard(props: AddAssetsSettingsCardProps) {
   const changed = (Object.keys(draft) as Editable[]).filter(field => draft[field] !== shown({}, value, field))
   const dirty = changed.length > 0
   const invalid = CHORD_FIELDS.some(field => chordInvalid(shown(draft, value, field)))
-    || countInvalid(shown(draft, value, 'pickerResultLimit'), 200)
-    || countInvalid(shown(draft, value, 'browseMaxEntries'), 5000)
+    || countInvalid(shown(draft, value, 'pickerResultLimit'), PICKER_RESULT_LIMIT)
+    || countInvalid(shown(draft, value, 'browseMaxEntries'), BROWSE_MAX_ENTRIES_LIMIT)
   const writable = settings.writable && value !== undefined
 
   const save = (): void => {
@@ -243,7 +244,7 @@ export function AddAssetsSettingsCard(props: AddAssetsSettingsCardProps) {
               t('settings.deviceUpload.off'),
             )}
 
-            {countField('pickerResultLimit', t('settings.pickerResultLimit'), 200)}
+            {countField('pickerResultLimit', t('settings.pickerResultLimit'), PICKER_RESULT_LIMIT)}
 
             <p className={css.group}>{t('settings.scope')}</p>
             {booleanField(
@@ -253,7 +254,7 @@ export function AddAssetsSettingsCard(props: AddAssetsSettingsCardProps) {
               t('settings.outsideWorkspace.off'),
               t('settings.outsideWorkspace.hint'),
             )}
-            {countField('browseMaxEntries', t('settings.browseMaxEntries'), 5000)}
+            {countField('browseMaxEntries', t('settings.browseMaxEntries'), BROWSE_MAX_ENTRIES_LIMIT)}
 
             <p className={css.group}>{t('settings.shortcuts')}</p>
             {chordField('filesShortcut', t('settings.filesShortcut'))}

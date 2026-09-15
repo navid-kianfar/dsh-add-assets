@@ -91,6 +91,9 @@
   bottom: calc(100% + 6px);
   left: 0;
   z-index: 60;
+  /* max-content first: an absolutely placed box shrinks to its containing block, which here is the
+     28px seat, so without it any line longer than a word stacks into a one-word column. */
+  width: max-content;
   max-width: 260px;
   padding: 4px 8px;
   border-radius: 8px;

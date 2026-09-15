@@ -31,10 +31,10 @@ import type { AddAssetsSettings } from '../host/types.ts'
 import { AddAssetsPlate } from './AddAssetsPlate.tsx'
 import { AddAssetsSettingsCard } from './AddAssetsSettingsCard.tsx'
 import { AttachmentPreview } from './AttachmentPreview.tsx'
-import { machineLevel, projectLevel } from './browse.ts'
+import { machineLevel, machineRequest, projectLevel } from './browse.ts'
+import { browseQuery } from './mention.ts'
 import type {
   AddAssetsPlateInjected, AddAssetsSettingsInjected, AssetBrowse, AttachmentPreviewInjected,
-  BrowseScope,
 } from './contract.ts'
 import { ImageIntake } from './intake.ts'
 import { en, zh, type AddAssetsKey } from './locales.ts'
@@ -179,7 +179,7 @@ function registerPlate(
     inject: (sessionId: SessionId): AddAssetsPlateInjected => ({
       hooks: { addAssetsSettings: scope },
       openCommandMenu: commandMenuOpener(ctx, sessionId),
-      browse: assetBrowse(ctx, sessionId, project, () => scope.getSnapshot().value),
+      browse: assetBrowse(ctx, sessionId, project),
       insertReference: referenceInserter(ctx, sessionId),
       insertText: textInserter(ctx, sessionId),
       attachDeviceFiles: files => intake.add(sessionId, files),
@@ -190,42 +190,32 @@ function registerPlate(
 /**
  * Build the picker's data face for one session.
  *
- * Which scopes it offers is a fact about the deployment, resolved per session rather than per
- * plugin: `remote.fileReferences` is a curated namespace a composition may omit, and machine
- * browsing is a setting a person can turn off. An empty roster leaves the plate's two workspace
- * rows disabled with a reason instead of opening a panel that can list nothing.
+ * Nothing here reads the settings section. This face lives in the seat's injected share, which the
+ * slot renderer caches per session, so anything decided here is decided once; the plate reads
+ * `outsideWorkspace` through its settings hook instead, which is what lets a change apply to an
+ * open composer.
  * @param ctx - the fiber holding both Remote namespaces.
  * @param sessionId - the session the picker is opened from.
- * @param settings - reads the resolved section at call time, so a committed change takes effect
- *   without remounting the seat.
- * @returns the face, or undefined when no scope can answer.
+ * @param project - whether this fiber can reach project discovery.
+ * @returns the face.
  */
-function assetBrowse(
-  ctx: ClientContext,
-  sessionId: SessionId,
-  project: boolean,
-  settings: () => AddAssetsSettings | undefined,
-): AssetBrowse | undefined {
-  const scopes: BrowseScope[] = [
-    ...project ? ['project' as const] : [],
-    ...settings()?.outsideWorkspace === false ? [] : ['machine' as const],
-  ]
-  if (scopes.length === 0) return undefined
+function assetBrowse(ctx: ClientContext, sessionId: SessionId, project: boolean): AssetBrowse {
   const t = ctx.locale.bind(NS)
   return {
-    scopes,
+    project,
     // Both scopes open at their own root: `''` is the workspace root for discovery, and the Host
     // endpoint reads a blank path as the account's home directory.
     start: () => '',
     list: async (scope, directory, filter, signal) => {
       if (scope === 'project') {
-        const result = await ctx.remote.fileReferences.list(sessionId, directory + filter.trimStart(), signal)
+        const result = await ctx.remote.fileReferences.list(sessionId, browseQuery(directory, filter), signal)
         // A Host failure is thrown rather than folded into an empty list: "nothing matches" and
         // "the workspace could not be read" are different answers, and the picker says so.
         if (!result.ok) throw new Error(`${result.error.message} (${result.error.code})`)
         return projectLevel(result.value, directory, filter.trim() !== '', t('picker.root'))
       }
-      const answer = await ctx.remote.addAssets.browse(directory, filter, signal)
+      const request = machineRequest(directory, filter)
+      const answer = await ctx.remote.addAssets.browse(request.path, request.query, signal)
       if (!answer.ok) throw new Error(`${answer.error.message} (${answer.error.code})`)
       // The endpoint returns its refusals as values so each one can be said differently; the picker
       // renders whichever message came back.

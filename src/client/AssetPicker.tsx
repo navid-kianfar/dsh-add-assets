@@ -17,6 +17,9 @@ import {
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { AssetBrowse, BrowseEntry, BrowseLevel, BrowseScope, PickerMode } from './contract.ts'
 import { FileGlyph, FolderGlyph, MachineGlyph, ProjectGlyph } from './Glyphs.tsx'
+import { isComposingKey } from './keyboard.ts'
+import { lastSeparator } from './mention.ts'
+import type { PickedPath } from './mention.ts'
 import css from './AssetPicker.module.css'
 
 /** Panel geometry, and the distances it keeps from its anchor and from the viewport edges. */
@@ -41,6 +44,11 @@ export interface AssetPickerProps {
   mode: PickerMode
   /** Path discovery for both scopes. */
   browse: AssetBrowse
+  /**
+   * Scopes on offer, in order; never empty while the panel is mounted. Live: when the one being
+   * browsed is withdrawn, the panel moves to the first that remains.
+   */
+  scopes: readonly BrowseScope[]
   /** Rows rendered per level, from the settings section. */
   resultLimit: number
   /** The plate button the panel is placed above. */
@@ -50,7 +58,16 @@ export interface AssetPickerProps {
   /** Dismiss without adding anything. */
   onClose: () => void
   /** Commit the chosen paths, in selection order; the owner decides how they enter the draft. */
-  onAdd: (paths: readonly { path: string; kind: 'file' | 'directory' }[]) => void
+  onAdd: (paths: readonly PickedPath[]) => void
+}
+
+/**
+ * Whether a crumb label is itself a root spelling that ends in a separator.
+ * @param label - the crumb's display text.
+ * @returns true for `/`, `C:\`, and the like.
+ */
+function endsWithSeparator(label: string): boolean {
+  return label.length > 0 && lastSeparator(label) === label.length - 1
 }
 
 /**
@@ -91,12 +108,12 @@ function usePlacement(anchorRef: RefObject<HTMLElement | null>): CSSProperties |
  * @param props - mode, discovery, limits, anchor, copy, and the two settlement callbacks.
  * @returns the portalled panel.
  */
-export function AssetPicker({ mode, browse, resultLimit, anchorRef, t, onClose, onAdd }: AssetPickerProps) {
+export function AssetPicker({ mode, browse, scopes, resultLimit, anchorRef, t, onClose, onAdd }: AssetPickerProps) {
   const panelRef = useRef<HTMLDivElement | null>(null)
   const searchRef = useRef<HTMLInputElement | null>(null)
   const listRef = useRef<HTMLUListElement | null>(null)
-  const [scope, setScope] = useState<BrowseScope>(() => browse.scopes[0] ?? 'project')
-  const [directory, setDirectory] = useState(() => browse.start(browse.scopes[0] ?? 'project'))
+  const [scope, setScope] = useState<BrowseScope>(() => scopes[0] ?? 'project')
+  const [directory, setDirectory] = useState(() => browse.start(scopes[0] ?? 'project'))
   const [filter, setFilter] = useState('')
   const [level, setLevel] = useState<BrowseLevel>(EMPTY_LEVEL)
   const [status, setStatus] = useState<Status>('loading')
@@ -171,6 +188,14 @@ export function AssetPicker({ mode, browse, resultLimit, anchorRef, t, onClose, 
     searchRef.current?.focus()
   }, [browse])
 
+  // A settings change can withdraw the scope being browsed while the panel is open; staying on it
+  // would keep listing through an endpoint the person just turned off.
+  useEffect(() => {
+    const fallback = scopes[0]
+    if (scopes.includes(scope) || fallback === undefined) return
+    switchScope(fallback)
+  }, [scope, scopes, switchScope])
+
   /** A row's primary action: select what this mode collects, descend into what it does not. */
   const activate = useCallback((entry: BrowseEntry): void => {
     if (mode === 'files' && entry.kind === 'directory') descend(entry)
@@ -185,7 +210,8 @@ export function AssetPicker({ mode, browse, resultLimit, anchorRef, t, onClose, 
   // composer's own dismissal never sees a click that lands on it.
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent): void => {
-      if (event.key !== 'Escape') return
+      // Escape during an IME composition cancels the composition, not the panel.
+      if (event.key !== 'Escape' || isComposingKey(event)) return
       event.preventDefault()
       onClose()
     }
@@ -211,6 +237,9 @@ export function AssetPicker({ mode, browse, resultLimit, anchorRef, t, onClose, 
   const parentCrumb = crumbs.length > 1 ? crumbs[crumbs.length - 2] : undefined
 
   const onSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
+    // While an IME composes, Enter commits a candidate and the arrows move between candidates; none
+    // of them are the panel's to act on.
+    if (isComposingKey(event.nativeEvent)) return
     const row = rows[highlight]
     switch (event.key) {
       case 'ArrowDown':
@@ -261,9 +290,9 @@ export function AssetPicker({ mode, browse, resultLimit, anchorRef, t, onClose, 
         </button>
       </header>
 
-      {browse.scopes.length > 1 ? (
+      {scopes.length > 1 ? (
         <div className={css.scopes} role="tablist" aria-label={t('picker.scope')}>
-          {browse.scopes.map(candidate => (
+          {scopes.map(candidate => (
             <button
               key={candidate}
               type="button"
@@ -282,7 +311,11 @@ export function AssetPicker({ mode, browse, resultLimit, anchorRef, t, onClose, 
       <nav className={css.crumbs} aria-label={title}>
         {crumbs.map((crumb, index) => (
           <span key={crumb.directory} className={css.crumbCell}>
-            {index > 0 ? <span className={css.crumbSeparator} aria-hidden>/</span> : null}
+            {/* No separator after a crumb that already ends in one — the filesystem root `/` or a
+                drive `C:\` — which would otherwise read as `/ / Users`. */}
+            {index > 0 && !endsWithSeparator(crumbs[index - 1]!.label)
+              ? <span className={css.crumbSeparator} aria-hidden>/</span>
+              : null}
             <button
               type="button"
               className={index === crumbs.length - 1 ? css.crumbCurrent : css.crumb}

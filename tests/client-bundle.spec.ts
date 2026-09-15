@@ -19,16 +19,47 @@
  * stand-in whose hooks answer their initial values and never run effects — enough to evaluate every
  * render-time read, and to walk the element tree it returns.
  *
- * Runs against `lib/client.js`, so it skips when the package has not been built. `npm test` does not
- * build first; `npm run build && npm test` does.
+ * Runs against `lib/client.js`, so the package must be built first: `npm run build && npm test`. A
+ * missing or stale bundle FAILS here, by name, rather than skipping — a skipped guard is a guard
+ * nobody notices is off, and a stale one passes against code that no longer exists.
  */
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import vm from 'node:vm'
 import { describe, expect, it, vi } from 'vitest'
 
 const BUNDLE = new URL('../lib/client.js', import.meta.url)
+const SOURCES = new URL('../src', import.meta.url)
 const built = existsSync(BUNDLE)
+
+/**
+ * The newest modification time under a directory.
+ * @param directory - the tree to walk.
+ * @returns milliseconds since the epoch.
+ */
+function newestUnder(directory: string): number {
+  const entries = readdirSync(directory, { withFileTypes: true })
+  const times = entries.map(entry => (entry.isDirectory()
+    ? newestUnder(join(directory, entry.name))
+    : statSync(join(directory, entry.name)).mtimeMs))
+  return Math.max(0, ...times)
+}
+
+describe('the built bundle under test', () => {
+  it('exists and is newer than every source file', () => {
+    expect(built, 'lib/client.js is missing: run `npm run build` before `npm test`').toBe(true)
+    const stale = statSync(BUNDLE).mtimeMs < newestUnder(SOURCES.pathname)
+    expect(stale, 'lib/client.js is older than src/: run `npm run build` before `npm test`').toBe(false)
+  })
+})
+
+/** The resolved section every test starts from. */
+const SETTINGS: Readonly<Record<string, unknown>> = {
+  replaceCommandButton: true, deviceUpload: true, outsideWorkspace: true, pickerResultLimit: 20,
+  filesShortcut: 'mod+u', foldersShortcut: 'mod+shift+u', commandShortcut: 'mod+/',
+  previewDensity: 'card', previewDetails: true,
+}
 
 /** One captured loader entry. */
 interface LoaderEntry {
@@ -88,7 +119,7 @@ function stubModule(source: string, binding: string): Record<string, unknown> {
  * Load the built bundle and run its apply against a recording context.
  * @returns every slot registration, with its component.
  */
-async function applyBundle(): Promise<Registration[]> {
+async function applyBundle(settings: Record<string, unknown> = SETTINGS): Promise<Registration[]> {
   const source = readFileSync(BUNDLE, 'utf8')
   let entry: LoaderEntry | undefined
   const sandbox = {
@@ -116,11 +147,6 @@ async function applyBundle(): Promise<Registration[]> {
   })
 
   const registrations: Registration[] = []
-  const settings = {
-    replaceCommandButton: true, deviceUpload: true, outsideWorkspace: true, pickerResultLimit: 20,
-    filesShortcut: 'mod+u', foldersShortcut: 'mod+shift+u', commandShortcut: 'mod+/',
-    previewDensity: 'card', previewDetails: true,
-  }
   const actx = { bail: () => true }
   const ctx: Record<string, unknown> = {
     remote: { $mount: async () => undefined, addAssets: {} },
@@ -168,11 +194,14 @@ function composeProps(
   registration: Registration,
   owner: Record<string, unknown>,
   kit: Record<string, unknown>,
+  snapshot?: unknown,
 ): Record<string, unknown> {
   const inject = registration.options['inject'] as (sessionId: string) => Record<string, unknown>
   const { hooks, ...face } = inject('s1') as { hooks: Record<string, { getSnapshot(): unknown }> }
+  // `snapshot` stands in for a settings change committed AFTER the share was injected: the renderer
+  // caches the share, and only the bound hook sees the new value.
   const bound = Object.fromEntries(Object.entries(hooks).map(([name, source]) =>
-    [`use${name[0]!.toUpperCase()}${name.slice(1)}`, selectorOver(source.getSnapshot())]))
+    [`use${name[0]!.toUpperCase()}${name.slice(1)}`, selectorOver(snapshot ?? source.getSnapshot())]))
   return { ...owner, ...kit, ...face, ...bound, t: (key: string) => key }
 }
 
@@ -204,18 +233,50 @@ function sessionKit(session: Record<string, unknown>, input: Record<string, unkn
 describe.skipIf(!built)('the built composer seats under the installed harness contract', () => {
   /**
    * Render the plate once.
-   * @returns the `+` button element.
+   * @param snapshot - the settings snapshot the hook reads, when it differs from the injected one.
+   * @returns every element of the rendered tree.
    */
-  async function renderPlate(session: Record<string, unknown>, input: Record<string, unknown>): Promise<Element> {
+  async function renderPlateTree(
+    session: Record<string, unknown>,
+    input: Record<string, unknown>,
+    snapshot?: unknown,
+  ): Promise<Element[]> {
     const plate = (await applyBundle()).find(entry => entry.options['name'] === 'conversation.input.left')
     expect(plate, 'the plate registered into conversation.input.left').toBeDefined()
     // `{}` is exactly what the installed composer passes this seat.
-    const tree = plate!.component(composeProps(plate!, {}, sessionKit(session, input)))
-    const button = elementsOf(tree).find(element =>
+    return elementsOf(plate!.component(composeProps(plate!, {}, sessionKit(session, input), snapshot)))
+  }
+
+  /**
+   * Render the plate once.
+   * @returns the `+` button element.
+   */
+  async function renderPlate(session: Record<string, unknown>, input: Record<string, unknown>): Promise<Element> {
+    const button = (await renderPlateTree(session, input)).find(element =>
       element.type === 'button' && element.props['aria-haspopup'] === 'menu')
     expect(button, 'the plate rendered its + button').toBeDefined()
     return button!
   }
+
+  /**
+   * The plate menu's row with one id.
+   * @param elements - the rendered tree.
+   * @param id - the row id.
+   * @returns the row entry.
+   */
+  function plateRowOf(elements: readonly Element[], id: string): Record<string, unknown> | undefined {
+    const menu = elements.find(element => Array.isArray(element.props['items']))
+    return (menu?.props['items'] as Record<string, unknown>[] | undefined)?.find(item => item['id'] === id)
+  }
+
+  it('follows an outsideWorkspace change without re-injecting the seat', async () => {
+    // No project discovery in this context, so machine browsing is the only scope there is.
+    const before = await renderPlateTree({}, {}, { value: SETTINGS })
+    expect(plateRowOf(before, 'files')?.['disabled']).toBe(false)
+    const after = await renderPlateTree({}, {}, { value: { ...SETTINGS, outsideWorkspace: false } })
+    expect(plateRowOf(after, 'files')?.['disabled']).toBe(true)
+    expect(plateRowOf(after, 'folders')?.['disabled']).toBe(true)
+  })
 
   it('renders the plate from an empty owner share without reading one', async () => {
     const button = await renderPlate({}, {})

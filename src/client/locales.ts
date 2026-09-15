@@ -11,6 +11,7 @@ export const zh = {
   'plate.browseUnavailable': '此部署未挂载文件检索服务',
   'plate.commandUnavailable': '此部署未挂载命令菜单',
   'plate.deviceFailed': '无法读取所选文件。',
+  'plate.skippedPaths': '已跳过 {count} 个所选路径：路径中含有双引号或控制字符，无法引用。',
 
   'picker.files.title': '添加工作区文件',
   'picker.folders.title': '添加工作区文件夹',
@@ -81,7 +82,7 @@ export const zh = {
   'settings.foldersShortcut': '添加文件夹',
   'settings.commandShortcut': '斜杠命令',
   'settings.shortcut.hint': '格式为 mod+u、mod+shift+u；mod 在 macOS 上是 Command，其他平台是 Ctrl。留空表示不设快捷键。',
-  'settings.shortcut.invalid': '不是有效的快捷键组合。',
+  'settings.shortcut.invalid': '不是有效的快捷键组合，且必须包含 mod 或 alt。',
   'settings.pickerResultLimit': '选择器每次显示的条目数',
   'settings.invalidNumber': '请输入 1 到 {max} 之间的整数。',
   'settings.scope': '浏览范围',
@@ -107,6 +108,7 @@ export const en = {
   'plate.browseUnavailable': 'This deployment mounts no file-reference provider',
   'plate.commandUnavailable': 'This deployment mounts no command menu',
   'plate.deviceFailed': 'The chosen files could not be read.',
+  'plate.skippedPaths': 'Skipped {count} of the chosen paths: a path containing a double quote or a control character cannot be referenced.',
 
   'picker.files.title': 'Add workspace files',
   'picker.folders.title': 'Add workspace folders',
@@ -175,7 +177,7 @@ export const en = {
   'settings.foldersShortcut': 'Add folders',
   'settings.commandShortcut': 'Slash command',
   'settings.shortcut.hint': 'Chords like mod+u or mod+shift+u; mod is Command on macOS and Ctrl elsewhere. Blank means no shortcut.',
-  'settings.shortcut.invalid': 'Not a keyboard chord.',
+  'settings.shortcut.invalid': 'Not a keyboard chord with mod or alt.',
   'settings.pickerResultLimit': 'Rows the picker shows per query',
   'settings.invalidNumber': 'Enter a whole number between 1 and {max}.',
   'settings.scope': 'Browse scope',

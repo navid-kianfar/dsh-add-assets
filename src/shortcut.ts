@@ -5,6 +5,11 @@
  * A chord is `+`-separated, case-insensitive, and ends with exactly one non-modifier key, e.g.
  * `mod+u`, `mod+shift+u`, `mod+/`. `mod` is the platform's primary accelerator — Command on Apple
  * hardware, Control elsewhere — so one configured value serves every deployment.
+ *
+ * Every chord carries `mod` or `alt`. The browser listens on the whole document so a chord works
+ * from the draft, and a chord without one of those would claim its key in every text field on the
+ * page: `/` or `u` could no longer be typed anywhere. Shift does not count, because shift+u is how
+ * a capital U is typed.
  * @module @achasoft/dsh-add-assets/shortcut
  */
 
@@ -49,12 +54,11 @@ const MODIFIERS: Readonly<Record<string, 'mod' | 'shift' | 'alt'>> = {
  * Parse one configured chord.
  * @param chord - the chord text, e.g. `mod+shift+u`.
  * @returns the parsed chord, or undefined when the text is not a chord this grammar accepts
- * (including the empty string, which callers read as "no shortcut").
+ * (including the empty string, which callers read as "no shortcut", and a chord with neither
+ * `mod` nor `alt`, which would take its key away from typing).
  */
 export function parseShortcut(chord: string): Shortcut | undefined {
   const parts = chord.trim().toLowerCase().split('+').filter(part => part !== '')
-  // A lone `+` is a legitimate key, and splitting erased it; restore it rather than rejecting.
-  if (parts.length === 0) return chord.trim() === '+' ? { mod: false, shift: false, alt: false, key: '+' } : undefined
   let mod = false
   let shift = false
   let alt = false
@@ -72,6 +76,7 @@ export function parseShortcut(chord: string): Shortcut | undefined {
   // Multi-character keys are only meaningful when they came from the named table above; anything
   // else is a typo that would silently never fire.
   if (key.length > 1 && !Object.values(NAMED_KEYS).includes(key)) return undefined
+  if (!mod && !alt) return undefined
   return { mod, shift, alt, key }
 }
 

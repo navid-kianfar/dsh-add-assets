@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  appendMentions, basename, browseQuery, crumbsOf, dirnameOf, labelOf, mentionOf, parentDirectory,
+  appendMentions, basename, browseQuery, crumbsOf, dirnameOf, labelOf, mentionOf, pairMentions,
 } from '../src/client/mention.ts'
 
 describe('mentionOf', () => {
@@ -20,6 +20,36 @@ describe('mentionOf', () => {
   it('refuses a path the grammar cannot represent', () => {
     expect(mentionOf({ path: 'we"ird.ts', kind: 'file' })).toBeUndefined()
     expect(mentionOf({ path: 'line\nbreak.ts', kind: 'file' })).toBeUndefined()
+  })
+})
+
+describe('pairMentions', () => {
+  it('keeps each mention with the pick it was made from when an earlier pick cannot be referenced', () => {
+    const paired = pairMentions([
+      { path: '/Users/me/report "final".md', kind: 'file' },
+      { path: '/Users/me/budget.xlsx', kind: 'file' },
+      { path: '/Users/me/archive', kind: 'directory' },
+    ])
+    expect(paired.skipped).toBe(1)
+    expect(paired.references.map(({ entry, mention }) => [labelOf(entry.path, entry.kind), mention])).toEqual([
+      ['budget.xlsx', '@/Users/me/budget.xlsx'],
+      ['archive/', '@/Users/me/archive/'],
+    ])
+  })
+
+  it('skips nothing when every pick is representable', () => {
+    const paired = pairMentions([{ path: 'a.ts', kind: 'file' }, { path: 'b', kind: 'directory' }])
+    expect(paired).toEqual({
+      references: [
+        { entry: { path: 'a.ts', kind: 'file' }, mention: '@a.ts' },
+        { entry: { path: 'b', kind: 'directory' }, mention: '@b/' },
+      ],
+      skipped: 0,
+    })
+  })
+
+  it('counts a pick with a control character as skipped too', () => {
+    expect(pairMentions([{ path: 'tab\there.ts', kind: 'file' }])).toEqual({ references: [], skipped: 1 })
   })
 })
 
@@ -57,12 +87,6 @@ describe('browseQuery', () => {
 })
 
 describe('directory arithmetic', () => {
-  it('walks up one level at a time and stops at the root', () => {
-    expect(parentDirectory('src/client/')).toBe('src/')
-    expect(parentDirectory('src/')).toBe('')
-    expect(parentDirectory('')).toBe('')
-  })
-
   it('builds a trail whose last crumb is the browsed directory', () => {
     expect(crumbsOf('', 'Workspace')).toEqual([{ label: 'Workspace', directory: '' }])
     expect(crumbsOf('src/client/', 'Workspace')).toEqual([
@@ -90,6 +114,16 @@ describe('labelOf', () => {
   it('keeps the trailing slash that marks a directory', () => {
     expect(labelOf('src/client', 'directory')).toBe('client/')
     expect(labelOf('src/client/', 'directory')).toBe('client/')
+  })
+
+  it('splits a Windows machine path on either separator', () => {
+    expect(labelOf('C:\\Users\\me\\shot.png', 'file')).toBe('shot.png')
+    expect(labelOf('C:\\Users\\me\\Desktop\\', 'directory')).toBe('Desktop/')
+    expect(labelOf('D:/data/set', 'directory')).toBe('set/')
+  })
+
+  it('keeps a backslash that is part of a POSIX name', () => {
+    expect(labelOf('/Users/me/a\\b.txt', 'file')).toBe('a\\b.txt')
   })
 
   it('handles a path with no parent at all', () => {

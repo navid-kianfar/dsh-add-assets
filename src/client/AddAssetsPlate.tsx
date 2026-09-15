@@ -27,8 +27,11 @@ import type { AddAssetsPlateInjected, PickerMode } from './contract.ts'
 import { caretOf, findComposerEditor } from './composer-dom.ts'
 import { detectEnd, plateLocked } from './composer-state.ts'
 import { FileGlyph, FolderGlyph, SlashGlyph, UploadGlyph } from './Glyphs.tsx'
+import { availableScopes } from './browse.ts'
+import { isComposingKey } from './keyboard.ts'
 import { isApplePlatform } from './platform.ts'
-import { appendMentions, labelOf, mentionOf } from './mention.ts'
+import { appendMentions, labelOf, pairMentions } from './mention.ts'
+import type { PickedPath } from './mention.ts'
 import { suppressResidentCommandButton } from './resident-button.ts'
 import css from './AddAssetsPlate.module.css'
 
@@ -120,6 +123,10 @@ export function AddAssetsPlate({
   // the clipboard projection, and each chip in it is longer there than in the editor's own terms.
   const draftEnd = detectEnd(draft, occurrences)
   const apple = useMemo(() => isApplePlatform(navigator), [])
+  // Derived here, from the live settings hook, rather than in the injected share: the renderer
+  // caches that share per session, so a roster decided there would miss an `outsideWorkspace` change.
+  const scopes = useMemo(() => availableScopes(browse.project, settings), [browse.project, settings])
+  const browsable = scopes.length > 0
 
   const focusDraft = useCallback((): void => {
     const seat = seatRef.current
@@ -154,7 +161,7 @@ export function AddAssetsPlate({
     switch (action) {
       case 'files':
       case 'folders':
-        if (browse !== undefined) setPicker(action)
+        if (browsable) setPicker(action)
         return
       case 'device':
         setNotice(null)
@@ -165,7 +172,7 @@ export function AddAssetsPlate({
         return
       default:
     }
-  }, [browse, locked, openCommand])
+  }, [browsable, locked, openCommand])
 
   const chords = useMemo(() => ({
     files: settings === undefined ? undefined : parseShortcut(settings.filesShortcut),
@@ -179,7 +186,7 @@ export function AddAssetsPlate({
     ]
     if (bindings.every(([chord]) => chord === undefined)) return undefined
     const onKeyDown = (event: globalThis.KeyboardEvent): void => {
-      if (locked) return
+      if (locked || isComposingKey(event)) return
       for (const [chord, action] of bindings) {
         if (chord === undefined || !matchesShortcut(event, chord, apple)) continue
         event.preventDefault()
@@ -216,49 +223,56 @@ export function AddAssetsPlate({
     if (queue.current.length === 0) setPlacing(0)
   }, [draft, draftEnd, draftRev, insertReference, insertText, locked, placing])
 
-  const addPaths = useCallback((paths: readonly { path: string; kind: 'file' | 'directory' }[]): void => {
+  const addPaths = useCallback((paths: readonly PickedPath[]): void => {
     setPicker(null)
     if (paths.length === 0) {
       focusDraft()
       return
     }
-    const mentions = paths.map(entry => mentionOf(entry)).filter((m): m is string => m !== undefined)
-    if (insertReference === undefined) {
-      // No trigger pipeline means no codec to serialize an occurrence, so the draft gets the plain
-      // text a person could have typed instead. It reads longer, and it still resolves.
-      if (mentions.length > 0) inputActions.setDraft(appendMentions(draft, mentions))
+    // Paired, not filtered and re-indexed: see pairMentions for the chip-to-wrong-path bug that
+    // looking mentions up by the pick's index produced.
+    const { references, skipped } = pairMentions(paths)
+    // A dropped pick is said out loud. Without this the person sees fewer chips than they chose and
+    // no reason; the grammar has no quoting for `"` or control characters, so the path cannot be
+    // offered any other way.
+    if (skipped > 0) setNotice(t('plate.skippedPaths', { count: skipped }))
+    if (references.length === 0) {
       focusDraft()
       return
     }
-    queue.current = paths.flatMap((entry, index) => {
-      const ref = mentions[index]
-      return ref === undefined ? [] : [{
-        source: REFERENCE_SOURCE,
-        ref,
-        label: labelOf(entry.path, entry.kind),
-        appearance: entry.kind === 'directory' ? 'folder' as const : 'file' as const,
-        clipboardText: ref,
-      }]
-    })
+    if (insertReference === undefined) {
+      // No trigger pipeline means no codec to serialize an occurrence, so the draft gets the plain
+      // text a person could have typed instead. It reads longer, and it still resolves.
+      inputActions.setDraft(appendMentions(draft, references.map(reference => reference.mention)))
+      focusDraft()
+      return
+    }
+    queue.current = references.map(({ entry, mention }) => ({
+      source: REFERENCE_SOURCE,
+      ref: mention,
+      label: labelOf(entry.path, entry.kind),
+      appearance: entry.kind === 'directory' ? 'folder' as const : 'file' as const,
+      clipboardText: mention,
+    }))
     setPlacing(current => current + 1)
     focusDraft()
-  }, [draft, focusDraft, inputActions, insertReference])
+  }, [draft, focusDraft, inputActions, insertReference, t])
 
   const items = useMemo<MenuEntry[]>(() => {
     const chordText = (chord: Shortcut | undefined): string | undefined =>
       chord === undefined ? undefined : formatShortcut(chord, apple)
-    const workspaceNote = browse === undefined ? t('plate.browseUnavailable') : undefined
+    const workspaceNote = browsable ? undefined : t('plate.browseUnavailable')
     const rows: MenuEntry[] = [
       {
         id: 'files',
         icon: <FileGlyph />,
-        disabled: browse === undefined,
+        disabled: !browsable,
         label: plateRow(t('plate.files'), workspaceNote ?? chordText(chords.files), workspaceNote !== undefined),
       },
       {
         id: 'folders',
         icon: <FolderGlyph />,
-        disabled: browse === undefined,
+        disabled: !browsable,
         label: plateRow(t('plate.folders'), workspaceNote ?? chordText(chords.folders), workspaceNote !== undefined),
       },
     ]
@@ -276,7 +290,7 @@ export function AddAssetsPlate({
       },
     )
     return rows
-  }, [apple, browse, chords, openCommandMenu, settings?.deviceUpload, t])
+  }, [apple, browsable, chords, openCommandMenu, settings?.deviceUpload, t])
 
   return (
     <span className={settings?.replaceCommandButton === true ? css.seatLeading : css.seat} ref={seatRef}>
@@ -327,10 +341,11 @@ export function AddAssetsPlate({
         }}
       />
       {notice === null ? null : <span className={css.notice} role="status">{notice}</span>}
-      {picker === null || browse === undefined ? null : (
+      {picker === null || !browsable ? null : (
         <AssetPicker
           mode={picker}
           browse={browse}
+          scopes={scopes}
           resultLimit={settings?.pickerResultLimit ?? DEFAULT_PICKER_ROWS}
           anchorRef={buttonRef}
           t={t}

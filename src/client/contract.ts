@@ -52,13 +52,15 @@ export interface BrowseLevel {
   readonly truncated: boolean
 }
 
-/** The picker's data face: which scopes are available, and how to list one level of each. */
+/** The picker's data face: whether project discovery exists, and how to list one level of a scope. */
 export interface AssetBrowse {
   /**
-   * Scopes this deployment can actually serve, in the order the picker offers them. A single-entry
-   * roster hides the scope switch entirely rather than showing a control with one choice.
+   * Whether this fiber can reach project discovery — fixed for the fiber's life, since the curated
+   * namespace is injected or not. Which scopes are OFFERED is not decided here: machine browsing
+   * follows a setting that can change while the seat is mounted, so the plate derives the roster
+   * from the live settings value (see `availableScopes`).
    */
-  readonly scopes: readonly BrowseScope[]
+  readonly project: boolean
   /**
    * The directory a scope starts at.
    * @param scope - the scope to open.
@@ -93,8 +95,8 @@ export interface AddAssetsPlateInjected {
    * @param leading - whether the trimmed draft is empty, which the pipeline reads as token position.
    */
   openCommandMenu: ((caret: number, draftRev: number, leading: boolean) => void) | undefined
-  /** Path discovery, or undefined when neither scope is available in this deployment. */
-  browse: AssetBrowse | undefined
+  /** Path discovery; the plate disables its workspace rows while no scope is available. */
+  browse: AssetBrowse
   /**
    * Place one path in the draft as an inline reference occurrence: the draft carries a short label
    * the composer renders as a glyph chip, while the full `@path` rides along as the occurrence's

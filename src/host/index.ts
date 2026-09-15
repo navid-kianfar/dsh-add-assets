@@ -19,6 +19,7 @@ import { installSettingsSection, settingsNamespace } from './settings-section.ts
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { parseShortcut } from '../shortcut.ts'
 import { AssetBrowseError, listAssets } from './browse.ts'
+import { BROWSE_MAX_ENTRIES_LIMIT, PICKER_RESULT_LIMIT } from './limits.ts'
 import type { AddAssetsSettings, AssetBrowseResult } from './types.ts'
 
 export type * from './types.ts'
@@ -51,7 +52,9 @@ export function validateAddAssetsSettings(value: Config): void {
   for (const field of CHORD_FIELDS) {
     const chord = value[field]
     if (chord !== '' && parseShortcut(chord) === undefined) {
-      throw new TypeError(`add-assets: ${field} "${chord}" is not a keyboard chord (e.g. "mod+u", "mod+shift+u", "")`)
+      throw new TypeError(
+        `add-assets: ${field} "${chord}" is not a keyboard chord with mod or alt (e.g. "mod+u", "mod+shift+u", "")`,
+      )
     }
   }
 }
@@ -63,11 +66,11 @@ export class AddAssetsService extends TypertRemoteService {
     replaceCommandButton: z.boolean().required(),
     deviceUpload: z.boolean().required(),
     outsideWorkspace: z.boolean().required(),
-    browseMaxEntries: z.number().step(1).min(1).max(5000).required(),
+    browseMaxEntries: z.number().step(1).min(1).max(BROWSE_MAX_ENTRIES_LIMIT).required(),
     filesShortcut: z.string().required(),
     foldersShortcut: z.string().required(),
     commandShortcut: z.string().required(),
-    pickerResultLimit: z.number().step(1).min(1).max(200).required(),
+    pickerResultLimit: z.number().step(1).min(1).max(PICKER_RESULT_LIMIT).required(),
     previewDensity: z.union(['card', 'compact'] as const).required(),
     previewDetails: z.boolean().required(),
   })

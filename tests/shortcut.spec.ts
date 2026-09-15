@@ -22,8 +22,15 @@ describe('parseShortcut', () => {
     expect(parseShortcut('mod+up')?.key).toBe('arrowup')
   })
 
-  it('keeps a lone plus, which splitting would otherwise erase', () => {
-    expect(parseShortcut('+')).toEqual({ mod: false, shift: false, alt: false, key: '+' })
+  it('refuses a chord without mod or alt, which would claim that key in every text field', () => {
+    expect(parseShortcut('/')).toBeUndefined()
+    expect(parseShortcut('u')).toBeUndefined()
+    expect(parseShortcut('enter')).toBeUndefined()
+    expect(parseShortcut('+')).toBeUndefined()
+    // Shift alone still types: shift+u is a capital U.
+    expect(parseShortcut('shift+u')).toBeUndefined()
+    expect(parseShortcut('shift+enter')).toBeUndefined()
+    expect(parseShortcut('alt+u')).toEqual({ mod: false, shift: false, alt: true, key: 'u' })
   })
 
   it('refuses text no key event could satisfy', () => {

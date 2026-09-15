@@ -29,11 +29,21 @@ export interface AddAssetsSettings {
    *
    * The file-reference provider refuses every path outside that directory, so reaching one at all
    * means this plugin's own endpoint listing entry NAMES anywhere the Host account can read. It
-   * opens no file, but it does let a browser session enumerate the machine's directory tree — turn
-   * it off for a deployment where that enumeration is itself the thing to withhold.
+   * opens no file.
+   *
+   * This is a PREFERENCE, not a security boundary. Like every field here it can be changed from the
+   * browser's settings card, and the person on the other side of that browser is the authenticated
+   * operator whose agent can already run shell commands on the Host. A composition value of false
+   * sets the default a person starts from; it does not withhold anything from them. A deployment
+   * that must not expose the directory tree to its browser users must not compose this plugin — or
+   * a shell-capable agent — for them.
    */
   outsideWorkspace: boolean
-  /** Entries the Host reports per browsed level before reporting the listing as truncated. */
+  /**
+   * Entries the Host reports per browsed level before reporting the listing as truncated. The
+   * schema caps it (see `limits`) because it bounds the Host's memory and work per request, and a
+   * browser settings write must not be able to lift that.
+   */
   browseMaxEntries: number
   /** Chord opening the workspace file picker; empty disables it. See the `shortcut` module's grammar. */
   filesShortcut: string
