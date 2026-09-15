@@ -1,6 +1,6 @@
 {
   "name": "@achasoft/dsh-add-assets",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Composer add-assets plate for the DeepSeek Harness Web Client: an options menu on the composer's + button (files, folders, slash commands) and a Claude Code-style draft attachment preview",
   "license": "MIT",
   "type": "module",
