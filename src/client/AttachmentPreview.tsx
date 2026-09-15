@@ -1,6 +1,6 @@
 /**
- * The draft attachment preview: one card per pending image, the document drop target that adds
- * more, and the full-size preview behind a card.
+ * The draft attachment preview: one card per pending image or file, the document drop target that
+ * adds more, and the full-size preview behind an image card.
  *
  * Referenced PATHS are not shown here: they ride the draft as inline reference chips the composer
  * itself renders, so a second surface for them would state the same thing twice.
@@ -13,14 +13,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { IconCloseFill14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { ComposerAttachment } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { AttachmentLightbox } from './AttachmentLightbox.tsx'
 import type { LightboxItem } from './AttachmentLightbox.tsx'
 import type { AttachmentPreviewInjected } from './contract.ts'
+import { attachmentsOwner, uploadStateOf } from './composer-state.ts'
+import type { DraftAttachment, DraftUpload } from './composer-state.ts'
+import { FileGlyph } from './Glyphs.tsx'
 import { detailsLine, formatBytes, formatDimensions, formatLabel } from './format.ts'
 import css from './AttachmentPreview.module.css'
 
-/** Full preview props: the composer's attachment share, the injected settings scope, and the copy. */
+/**
+ * Full preview props: the composer's attachment share, the injected settings scope, and the copy.
+ *
+ * The owner share is read through `attachmentsOwner`, never destructured by name: `PropsRuntime`
+ * here spells the build-time checkout's callbacks, and the installed composer renamed them.
+ */
 export type AttachmentPreviewProps =
   PropsRuntime<'conversation.input.attachments'> & InjectFace<AttachmentPreviewInjected> & PropsLocale<'add-assets'>
 
@@ -39,7 +46,7 @@ interface Dimensions {
  * @param attachments - the pending attachments, in draft order.
  * @returns dimensions by attachment id, filled in as decodes settle.
  */
-function useDimensions(attachments: readonly ComposerAttachment[]): ReadonlyMap<string, Dimensions> {
+function useDimensions(attachments: readonly DraftAttachment[]): ReadonlyMap<string, Dimensions> {
   const [sizes, setSizes] = useState<ReadonlyMap<string, Dimensions>>(new Map())
   // Probed ids, kept out of state on purpose: they gate the decode, and folding them into `sizes`
   // would make this effect depend on its own result.
@@ -51,8 +58,10 @@ function useDimensions(attachments: readonly ComposerAttachment[]): ReadonlyMap<
       if (!live.has(id)) probed.current.delete(id)
     }
     for (const attachment of attachments) {
-      if (probed.current.has(attachment.id)) continue
+      // File drafts have no object URL to decode, and no pixel size to report.
+      if (attachment.previewUrl === undefined || probed.current.has(attachment.id)) continue
       probed.current.add(attachment.id)
+      const src = attachment.previewUrl
       const probe = new Image()
       probe.onload = () => {
         if (!alive) return
@@ -61,7 +70,7 @@ function useDimensions(attachments: readonly ComposerAttachment[]): ReadonlyMap<
           { width: probe.naturalWidth, height: probe.naturalHeight },
         ))
       }
-      probe.src = attachment.previewUrl
+      probe.src = src
     }
     setSizes((current) => {
       const kept = [...current].filter(([id]) => live.has(id))
@@ -79,10 +88,10 @@ function useDimensions(attachments: readonly ComposerAttachment[]): ReadonlyMap<
  * per element, so depth rather than a boolean decides when the pointer has actually left.
  * @param canAcceptDrop - whether the composer would take a drop right now; the overlay still shows
  *   while false, saying so, because an invisible refusal reads as a broken page.
- * @param onAddImages - the composer's own validating add path.
+ * @param onAddFiles - the composer's own validating add path; undefined refuses every drop.
  * @returns whether a file drag is currently over the document.
  */
-function useFileDrag(canAcceptDrop: boolean, onAddImages: (files: readonly File[]) => void): boolean {
+function useFileDrag(canAcceptDrop: boolean, onAddFiles: ((files: readonly File[]) => void) | undefined): boolean {
   const [dragging, setDragging] = useState(false)
   const depth = useRef(0)
   useEffect(() => {
@@ -121,7 +130,7 @@ function useFileDrag(canAcceptDrop: boolean, onAddImages: (files: readonly File[
       if (transfer === null) return
       event.preventDefault()
       reset()
-      if (canAcceptDrop) onAddImages([...transfer.files])
+      if (canAcceptDrop) onAddFiles?.([...transfer.files])
     }
     document.addEventListener('dragenter', onDragEnter)
     document.addEventListener('dragover', onDragOver)
@@ -135,8 +144,15 @@ function useFileDrag(canAcceptDrop: boolean, onAddImages: (files: readonly File[
       document.removeEventListener('drop', onDrop)
       window.removeEventListener('dragend', reset)
     }
-  }, [canAcceptDrop, onAddImages])
+  }, [canAcceptDrop, onAddFiles])
   return dragging
+}
+
+/** One rendered card: the attachment, its display text, and — for a file — its upload state. */
+interface CardItem extends LightboxItem {
+  readonly attachment: DraftAttachment
+  /** Undefined for an image; a file's upload state otherwise. */
+  readonly upload: DraftUpload['status'] | undefined
 }
 
 /**
@@ -145,45 +161,52 @@ function useFileDrag(canAcceptDrop: boolean, onAddImages: (files: readonly File[
  * namespace-bound translate.
  * @returns the card row, the drop invitation while a file drag is live, and the open preview.
  */
-export function AttachmentPreview({
-  attachments, canAcceptDrop, onAddImages, onRemoveImage, dropLimits,
-  sessionId, useAddAssetsSettings, publishIntake, t,
-}: AttachmentPreviewProps) {
+export function AttachmentPreview(props: AttachmentPreviewProps) {
+  const { sessionId, useAddAssetsSettings, publishIntake, t } = props
+  const {
+    attachments, canAcceptDrop, addFiles, removeAttachment, uploads, retryFile, dropLimits,
+  } = attachmentsOwner(props)
   const settings = useAddAssetsSettings(snapshot => snapshot.value)
   const [openId, setOpenId] = useState<string | null>(null)
   const sizes = useDimensions(attachments)
-  const dragging = useFileDrag(canAcceptDrop, onAddImages)
+  const dragging = useFileDrag(canAcceptDrop, addFiles)
 
-  // The plate's device-upload entry has no other way to reach the composer's image intake; this
-  // seat is the only holder of it. See the intake module for why the channel exists.
+  // The plate's device-upload entry has no other way to reach the composer's intake; this seat is
+  // the only holder of it. See the intake module for why the channel exists.
   useEffect(() => {
-    if (sessionId === undefined) return undefined
-    return publishIntake(sessionId, onAddImages)
-  }, [onAddImages, publishIntake, sessionId])
+    if (sessionId === undefined || addFiles === undefined) return undefined
+    return publishIntake(sessionId, addFiles)
+  }, [addFiles, publishIntake, sessionId])
 
   const compact = settings?.previewDensity === 'compact'
   const withDetails = settings?.previewDetails !== false && !compact
 
-  const items = useMemo<readonly (LightboxItem & { attachment: ComposerAttachment })[]>(
+  const items = useMemo<readonly CardItem[]>(
     () => attachments.map((attachment) => {
-      const name = attachment.file.name === '' ? t('attachment.pending') : attachment.file.name
+      const upload = uploadStateOf(attachment, uploads)
+      const isFile = attachment.kind === 'file'
+      const fallback = isFile ? t('attachment.file') : t('attachment.pending')
+      const name = attachment.file.name === '' ? fallback : attachment.file.name
       const size = sizes.get(attachment.id)
-      return {
-        id: attachment.id,
-        src: attachment.previewUrl,
-        name,
-        details: detailsLine([
-          formatLabel(attachment.file.name, attachment.file.type) ?? t('attachment.image'),
-          size === undefined ? undefined : formatDimensions(size.width, size.height),
-          formatBytes(attachment.file.size),
-        ]),
-        attachment,
-      }
+      // A file's upload is the one fact about it that can still go wrong before sending, so while it
+      // is unsettled the details line says that instead of the format and size.
+      const details = upload === 'uploading'
+        ? t('attachment.uploading')
+        : upload === 'error'
+          ? t('attachment.uploadFailed')
+          : detailsLine([
+            formatLabel(attachment.file.name, attachment.file.type) ?? (isFile ? t('attachment.file') : t('attachment.image')),
+            size === undefined ? undefined : formatDimensions(size.width, size.height),
+            formatBytes(attachment.file.size),
+          ])
+      return { id: attachment.id, src: attachment.previewUrl ?? '', name, details, attachment, upload }
     }),
-    [attachments, sizes, t],
+    [attachments, sizes, t, uploads],
   )
 
-  const openIndex = items.findIndex(item => item.id === openId)
+  // Only images page through the full-size preview; a file card has nothing to show there.
+  const images = useMemo(() => items.filter(item => item.attachment.previewUrl !== undefined), [items])
+  const openIndex = images.findIndex(item => item.id === openId)
   // A preview whose attachment was removed — from inside the preview, or by another surface —
   // closes rather than showing a released object URL.
   useEffect(() => {
@@ -193,12 +216,12 @@ export function AttachmentPreview({
   // Removing from inside the preview keeps the preview open on what is left, which is the whole
   // reason to page through attachments there; only the last removal closes it.
   const remove = useCallback((id: string): void => {
-    const at = attachments.findIndex(candidate => candidate.id === id)
+    const at = images.findIndex(candidate => candidate.id === id)
     if (at < 0) return
-    const survivor = attachments[at + 1] ?? attachments[at - 1]
+    const survivor = images[at + 1] ?? images[at - 1]
     setOpenId(survivor?.id ?? null)
-    onRemoveImage(attachments[at]!.id)
-  }, [attachments, onRemoveImage])
+    removeAttachment(id)
+  }, [images, removeAttachment])
 
   return (
     <>
@@ -220,45 +243,78 @@ export function AttachmentPreview({
 
       {items.length === 0 ? null : (
         <ul className={compact ? css.railCompact : css.rail} aria-label={t('attachment.group')}>
-          {items.map(item => (
-            <li key={item.id} className={compact ? css.chip : css.card}>
-              <button
-                type="button"
-                className={css.body}
-                title={t('attachment.open')}
-                onClick={() => { setOpenId(item.id) }}
-              >
-                <img className={compact ? css.thumbCompact : css.thumb} src={item.src} alt={item.name} />
-                <span className={css.meta}>
-                  <span className={css.name}>{item.name}</span>
-                  {withDetails && item.details !== '' ? <span className={css.details}>{item.details}</span> : null}
-                </span>
-              </button>
-              <button
-                type="button"
-                className={css.remove}
-                aria-label={t('attachment.remove', { name: item.name })}
-                onClick={() => { onRemoveImage(item.attachment.id) }}
-              >
-                <IconCloseFill14 />
-              </button>
-            </li>
-          ))}
+          {items.map((item) => {
+            const failed = item.upload === 'error'
+            // An unsettled upload is shown even in the compact and details-off forms: it is state the
+            // person has to act on, not a detail they chose to hide.
+            const detailsShown = item.upload === 'uploading' || failed || withDetails
+            const meta = (
+              <span className={css.meta}>
+                <span className={css.name}>{item.name}</span>
+                {detailsShown && item.details !== ''
+                  ? <span className={failed ? css.detailsFailed : css.details}>{item.details}</span>
+                  : null}
+              </span>
+            )
+            const glyph = (
+              <span className={compact ? css.glyphCompact : css.glyph} aria-hidden>
+                <FileGlyph size={compact ? 12 : 18} />
+              </span>
+            )
+            return (
+              <li key={item.id} className={compact ? css.chip : css.card}>
+                {item.upload === undefined ? (
+                  <button
+                    type="button"
+                    className={css.body}
+                    title={t('attachment.open')}
+                    onClick={() => { setOpenId(item.id) }}
+                  >
+                    <img className={compact ? css.thumbCompact : css.thumb} src={item.src} alt={item.name} />
+                    {meta}
+                  </button>
+                ) : failed && retryFile !== undefined ? (
+                  <button
+                    type="button"
+                    className={css.body}
+                    aria-label={t('attachment.retry', { name: item.name })}
+                    onClick={() => { retryFile(item.id) }}
+                  >
+                    {glyph}
+                    {meta}
+                  </button>
+                ) : (
+                  <span className={css.fileBody} title={item.name}>
+                    {glyph}
+                    {meta}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className={css.remove}
+                  aria-label={t('attachment.remove', { name: item.name })}
+                  onClick={() => { removeAttachment(item.id) }}
+                >
+                  <IconCloseFill14 />
+                </button>
+              </li>
+            )
+          })}
         </ul>
       )}
 
       {openIndex < 0 ? null : (
         <AttachmentLightbox
-          items={items}
+          items={images}
           index={openIndex}
           labels={{
             close: t('lightbox.close'),
             previous: t('lightbox.previous'),
             next: t('lightbox.next'),
-            position: t('lightbox.position', { index: openIndex + 1, total: items.length }),
-            remove: t('attachment.remove', { name: items[openIndex]?.name ?? '' }),
+            position: t('lightbox.position', { index: openIndex + 1, total: images.length }),
+            remove: t('attachment.remove', { name: images[openIndex]?.name ?? '' }),
           }}
-          onNavigate={(next) => { setOpenId(items[next]?.id ?? null) }}
+          onNavigate={(next) => { setOpenId(images[next]?.id ?? null) }}
           onRemove={remove}
           onClose={() => { setOpenId(null) }}
         />

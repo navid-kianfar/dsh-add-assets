@@ -15,14 +15,17 @@ import { IconPlusOutline16, Menu, Tooltip } from '@deepseek-ai/dsh-client-ui-pri
 import type { MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pulls the ui-conversation SlotMap merge (the input.left seat) and the input standard
-// kit (useInput + inputActions) it publishes.
+// kit (useInput + inputActions) it publishes. Session lifecycle comes from the session kit's
+// `useSession`, never from an owner share: the installed composer renders this seat with an empty
+// one (see composer-state).
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { formatShortcut, matchesShortcut, parseShortcut } from '../shortcut.ts'
 import type { Shortcut } from '../shortcut.ts'
 import { AssetPicker } from './AssetPicker.tsx'
 import type { ReferenceInsert } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import type { AddAssetsPlateInjected, PickerMode } from './contract.ts'
-import { caretOf, findComposerTextarea } from './composer-dom.ts'
+import { caretOf, findComposerEditor } from './composer-dom.ts'
+import { detectEnd, plateLocked } from './composer-state.ts'
 import { FileGlyph, FolderGlyph, SlashGlyph, UploadGlyph } from './Glyphs.tsx'
 import { isApplePlatform } from './platform.ts'
 import { appendMentions, labelOf, mentionOf } from './mention.ts'
@@ -49,7 +52,12 @@ const REFERENCE_SOURCE = 'add-assets'
 /** How long the plate's own failure line stays up before it clears itself. */
 const NOTICE_MS = 4000
 
-/** Full plate props: runtime share (standard kit + InputZone owner) & injected share & locale seat. */
+/**
+ * Full plate props: the session standard kit & injected share & locale seat.
+ *
+ * `PropsRuntime` here still carries the build-time checkout's `InputZone` owner share (`session`,
+ * `input`), but the installed composer passes none — so nothing below may destructure it.
+ */
 export type AddAssetsPlateProps =
   PropsRuntime<'conversation.input.left'> & InjectFace<AddAssetsPlateInjected> & PropsLocale<'add-assets'>
 
@@ -80,13 +88,15 @@ function plateRow(label: string, trailing: string | undefined, muted: boolean): 
  * @returns the `+` button, its plate, and the workspace picker while one is open.
  */
 export function AddAssetsPlate({
-  useInput, inputActions, useAddAssetsSettings, openCommandMenu, browse, insertReference,
-  attachDeviceFiles, session, t,
+  useSession, useInput, inputActions, useAddAssetsSettings, openCommandMenu, browse, insertReference,
+  insertText, attachDeviceFiles, t,
 }: AddAssetsPlateProps) {
   const settings = useAddAssetsSettings(snapshot => snapshot.value)
   const draft = useInput(state => state.draft)
   const draftRev = useInput(state => state.draftRev)
   const phase = useInput(state => state.phase)
+  const occurrences = useInput(state => state.occurrences)
+  const removed = useSession(snapshot => snapshot.removed)
   const seatRef = useRef<HTMLSpanElement | null>(null)
   const buttonRef = useRef<HTMLButtonElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -103,14 +113,17 @@ export function AddAssetsPlate({
   const queue = useRef<readonly ReferenceInsert[]>([])
   const [placing, setPlacing] = useState(0)
 
-  // The machine refuses writes while a submission is being adjudicated or sent, and a removed
-  // session accepts nothing at all; both make every plate action a write that would be rejected.
-  const locked = session.removed || phase === 'adjudicating' || phase === 'submitting'
+  // See plateLocked: an adjudicating or submitting machine, or a removed session, rejects every
+  // write a plate action would make.
+  const locked = plateLocked(removed, phase)
+  // Every span the plate hands the editor is measured here, never at `draft.length`: the draft is
+  // the clipboard projection, and each chip in it is longer there than in the editor's own terms.
+  const draftEnd = detectEnd(draft, occurrences)
   const apple = useMemo(() => isApplePlatform(navigator), [])
 
   const focusDraft = useCallback((): void => {
     const seat = seatRef.current
-    if (seat !== null) findComposerTextarea(seat)?.focus()
+    if (seat !== null) findComposerEditor(seat)?.focus()
   }, [])
 
   useEffect(() => {
@@ -128,12 +141,12 @@ export function AddAssetsPlate({
   const openCommand = useCallback((): void => {
     if (openCommandMenu === undefined) return
     const seat = seatRef.current
-    const textarea = seat === null ? null : findComposerTextarea(seat)
-    // Focus first: the candidate menu is a combobox whose keyboard arbitration runs on the
-    // textarea, so opening it while focus sits on a plate row would leave the arrow keys dead.
-    textarea?.focus()
-    openCommandMenu(caretOf(textarea, draft.length), draftRev, draft.trim() === '')
-  }, [draft, draftRev, openCommandMenu])
+    const editor = seat === null ? null : findComposerEditor(seat)
+    // Focus first: the candidate menu is a combobox whose keyboard arbitration runs on the draft
+    // editor, so opening it while focus sits on a plate row would leave the arrow keys dead.
+    editor?.focus()
+    openCommandMenu(caretOf(editor, draftEnd), draftRev, draft.trim() === '')
+  }, [draft, draftEnd, draftRev, openCommandMenu])
 
   const run = useCallback((action: PlateAction): void => {
     setOpen(false)
@@ -186,21 +199,22 @@ export function AddAssetsPlate({
       setPlacing(0)
       return
     }
+    const end = { start: draftEnd, end: draftEnd, draftRev }
     // A reference replaces its span, and appending one to text that does not end in whitespace
     // would weld it to the previous word. The space is its own transaction; this effect re-runs on
-    // the revision it produces and places the reference then. (The machine adds the SEPARATING
-    // space after a reference itself, so only the leading side needs this.)
-    if (draft !== '' && !/\s$/u.test(draft)) {
-      inputActions.setDraft(`${draft} `)
-      return
-    }
+    // the revision it produces and places the reference then. (The editor adds the SEPARATING
+    // space after a reference itself, so only the leading side needs this.) It goes through the
+    // span-checked text verb, not setDraft, which would flatten the chips already placed; a space
+    // the editor refuses — or no verb to write it with — places the reference unspaced rather than
+    // looping on a revision that will never arrive.
+    if (draft !== '' && !/\s$/u.test(draft) && insertText?.(' ', end) === true) return
     queue.current = queue.current.slice(1)
     // A refused insert means the draft moved under this queue — the person typed while the panel
     // was settling — so the rest is abandoned rather than placed at offsets that no longer mean
     // what they meant when the picker computed them.
-    if (!insertReference(next, { start: draft.length, end: draft.length, draftRev })) queue.current = []
+    if (!insertReference(next, end)) queue.current = []
     if (queue.current.length === 0) setPlacing(0)
-  }, [draft, draftRev, inputActions, insertReference, locked, placing])
+  }, [draft, draftEnd, draftRev, insertReference, insertText, locked, placing])
 
   const addPaths = useCallback((paths: readonly { path: string; kind: 'file' | 'directory' }[]): void => {
     setPicker(null)

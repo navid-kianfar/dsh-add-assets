@@ -181,6 +181,7 @@ function registerPlate(
       openCommandMenu: commandMenuOpener(ctx, sessionId),
       browse: assetBrowse(ctx, sessionId, project, () => scope.getSnapshot().value),
       insertReference: referenceInserter(ctx, sessionId),
+      insertText: textInserter(ctx, sessionId),
       attachDeviceFiles: files => intake.add(sessionId, files),
     }),
   }, AddAssetsPlate))
@@ -277,6 +278,26 @@ function referenceInserter(
   const actx = ctx.sessions.scope(sessionId)
   if (conversation === undefined || actx === undefined) return undefined
   return (reference, span) => conversation.input.for(actx).insertReference(reference, span)
+}
+
+/**
+ * Bind the plain-text writer for one session.
+ *
+ * Emitted as the scoped `slash/input-insert-text` event on the session scope, which the composer's
+ * input hub answers with its span-checked text insertion. That is a public verb in both the checkout
+ * this compiles against and the installed harness, and unlike `inputActions.setDraft` it edits the
+ * editor document in place, so reference chips already in the draft survive it.
+ * @param ctx - the fiber holding the session service.
+ * @param sessionId - the session the plate is mounted for.
+ * @returns the writer, or undefined when the session scope is not resolvable.
+ */
+function textInserter(
+  ctx: ClientContext,
+  sessionId: SessionId,
+): ((text: string, span: TokenSpan) => boolean) | undefined {
+  const actx = ctx.sessions.scope(sessionId)
+  if (actx === undefined) return undefined
+  return (text, span) => actx.bail(actx, 'slash/input-insert-text', { text, span }) === true
 }
 
 /**

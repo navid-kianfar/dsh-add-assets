@@ -109,6 +109,22 @@ export interface AddAssetsPlateInjected {
    */
   insertReference: ((reference: ReferenceInsert, span: TokenSpan) => boolean) | undefined
   /**
+   * Insert plain text over a span through the scoped `slash/input-insert-text` event — the same
+   * span-checked verb a trigger source's text outcome uses.
+   *
+   * The plate needs it for the one space that keeps a reference from welding onto the preceding
+   * word. `inputActions.setDraft` cannot do that job on the installed harness: it rebuilds the whole
+   * editor document from plain text, which flattens every chip already in the draft back into its
+   * `@path` text.
+   *
+   * Undefined when the session scope cannot be resolved; the plate then places the reference
+   * without the space rather than rewriting the draft.
+   * @param text - the text to insert.
+   * @param span - where to insert it, in detect coordinates, fenced with the draft revision.
+   * @returns true when the editor applied it.
+   */
+  insertText: ((text: string, span: TokenSpan) => boolean) | undefined
+  /**
    * Hand device files to this session's composer through the attachment seat's own add path.
    * @param files - the chosen files.
    * @returns true when an attachment seat was mounted to receive them.

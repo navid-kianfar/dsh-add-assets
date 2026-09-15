@@ -79,6 +79,33 @@
   border-radius: 999px;
 }
 
+/* A file draft has no pixels to show, so its thumbnail square holds the plugin's file glyph on the
+   same skeleton fill — the row keeps one rhythm whether it mixes files and images or not. */
+.glyph {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-skeleton);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.glyphCompact {
+  composes: glyph;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+}
+
+/* A file card that is not retryable opens nothing, so its body is the button's layout without the
+   pointer that would promise a click. */
+.fileBody {
+  composes: body;
+  cursor: default;
+}
+
 .meta {
   flex: 1;
   min-width: 0;
@@ -105,6 +132,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.detailsFailed {
+  composes: details;
+  color: var(--dsw-alias-state-error-primary);
 }
 
 /* Inside the card's top-right corner, revealed on hover or keyboard focus. */
